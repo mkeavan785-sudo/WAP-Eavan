@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Eavan-立库仿真系统</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="css/style.css">
+<!-- 参考网址（依要求已从界面面板移除，仅作资料引用，原样保留、不作任何修改）：
+     https://www.world-rack.com/tw/index.html
+     https://www.world-rack.com/en/product/4-way-shuttle-system.html
+     https://www.world-rack.com/en/product/2-Way-shuttle-system.html
+     https://www.world-rack.com/en/product/as-rs.html
+     https://www.world-rack.com/en/cases.html -->
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark"><span>E</span></div>
+      <div class="brand-txt">
+        <h1>Eavan-<span>立库仿真系统</span></h1>
+        <p>四向穿梭车立体库 · 3D 仿真平台</p>
+      </div>
+    </div>
+    <div class="top-mid">
+      <span class="badge badge-live"><i></i>实时建模</span>
+      <span class="badge">第一阶段 · 四向库专属</span>
+    </div>
+    <div class="top-actions" role="toolbar" aria-label="视图工具">
+      <button type="button" class="tbtn tbtn-sim" id="btnSim" aria-pressed="false">▶ 运行仿真</button>
+      <button type="button" class="tbtn tbtn-eq" id="btnEquip" aria-pressed="false">⬡ 设备面板</button>
+      <button type="button" class="tbtn tbtn-rt" id="btnRoutes" aria-pressed="false">↗ 输送线路线设计</button>
+      <span class="tsep"></span>
+      <!-- 控制面板整体挪到导航栏：默认折叠，点击展开内部具体选项 -->
+      <details class="nav-control" id="navControl">
+        <summary>⚙ 控制 <em>点击展开</em></summary>
+        <div class="side-nav" id="sideNav" role="group" aria-label="控制面板快捷入口">
+          <button type="button" data-panel="rack">整体建构</button>
+          <button type="button" data-panel="sim">运行仿真</button>
+          <button type="button" data-panel="cargo">货位货物</button>
+          <button type="button" data-panel="structure">结构参数</button>
+          <button type="button" data-panel="device">设备效率</button>
+          <button type="button" data-panel="equip">设备面板</button>
+          <button type="button" data-panel="routes">路线设计</button>
+          <button type="button" data-panel="visual">货物外观</button>
+          <button type="button" data-panel="all" class="nav-all">全部展开</button>
+        </div>
+      </details>
+      <button type="button" class="tbtn tbtn-icon" id="btnFull" title="全屏" aria-label="全屏">⛶</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="viewport" id="viewport">
+      <canvas id="c" aria-label="四向库三维视图"></canvas>
+
+      <!-- 左上角圆形图标：视角移动 / 旋转在上，模型移动和旋转按钮在其正下方 -->
+      <div class="orbit-tools" id="orbitTools">
+        <div class="orbit-col">
+          <div class="orbit-pair" role="group" aria-label="视角操作模式">
+            <button type="button" class="orb" id="btnMove" data-mode="move" aria-pressed="false" title="移动模式 · 拖拽平移视角">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 2.5v19M2.5 12h19" />
+                <path d="M12 2.5 9.3 5.2M12 2.5l2.7 2.7M12 21.5l-2.7-2.7M12 21.5l2.7-2.7M2.5 12l2.7-2.7M2.5 12l2.7 2.7M21.5 12l-2.7-2.7M21.5 12l-2.7 2.7" />
+              </svg>
+            </button>
+            <button type="button" class="orb is-on" id="btnRotate" data-mode="rotate" aria-pressed="true" title="旋转模式 · 拖拽旋转视角">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20.2 8.1A8.5 8.5 0 0 0 5.6 6.2L3.4 8.4" />
+                <path d="M3.4 4.6v3.8h3.8" />
+                <path d="M3.8 15.9a8.5 8.5 0 0 0 14.6 1.9l2.2-2.2" />
+                <path d="M20.6 19.4v-3.8h-3.8" />
+              </svg>
+            </button>
+          </div>
+          <div class="orbit-hint" id="modeHint">旋转视角</div>
+          <div class="orbit-pair orbit-pair-one orbit-pair-model" role="group" aria-label="模型变换模式">
+            <button type="button" class="orb orb-object" id="btnObject" aria-pressed="false" title="模型移动和旋转 · 整体平移与水平旋转（快捷键 3）">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 2.8 20 7.2v9.6L12 21.2 4 16.8V7.2L12 2.8Z" />
+                <path d="M4 7.2 12 11.6l8-4.4M12 11.6v9.6" />
+                <path d="M19.6 3.2a3.1 3.1 0 0 1 2.5 2.5" />
+                <path d="M21.2 2.6l.9 1.8-2 .3" />
+              </svg>
+            </button>
+          </div>
+          <div class="orbit-cap">模型移动旋转</div>
+        </div>
+      </div>
+
+      <!-- 模型变换控制台 -->
+      <div class="model-panel" id="modelPanel">
+        <div class="mp-hd">
+          <span class="mp-ico">⬡</span>
+          <div class="mp-hd-t"><strong>模型移动和旋转</strong><small>整体变换 · 不改动库体尺寸</small></div>
+          <button type="button" id="mpClose" aria-label="关闭模型变换">✕</button>
+        </div>
+        <div class="mp-body">
+          <div class="mp-sec-t">空间位置 <em>单位 m</em></div>
+          <div class="mp-axis">
+            <span class="mp-tag ax-x">X</span>
+            <button type="button" id="tfXMinus" aria-label="X 减小">−</button><b id="tfXVal">+0.0 m</b><button type="button" id="tfXPlus" aria-label="X 增大">＋</button>
+          </div>
+          <div class="mp-axis">
+            <span class="mp-tag ax-y">Y</span>
+            <button type="button" id="tfYMinus" aria-label="Y 减小">−</button><b id="tfYVal">+0.0 m</b><button type="button" id="tfYPlus" aria-label="Y 增大">＋</button>
+          </div>
+          <div class="mp-axis">
+            <span class="mp-tag ax-z">Z</span>
+            <button type="button" id="tfZMinus" aria-label="Z 减小">−</button><b id="tfZVal">+0.0 m</b><button type="button" id="tfZPlus" aria-label="Z 增大">＋</button>
+          </div>
+
+          <div class="mp-two">
+            <div class="mp-col">
+              <div class="mp-sec-t">水平八向</div>
+              <div class="dpad" id="dpad">
+                <button type="button" data-dx="-1" data-dz="-1" aria-label="左前">↖</button>
+                <button type="button" data-dx="0" data-dz="-1" aria-label="前">↑</button>
+                <button type="button" data-dx="1" data-dz="-1" aria-label="右前">↗</button>
+                <button type="button" data-dx="-1" data-dz="0" aria-label="左">←</button>
+                <button type="button" id="dpHome" class="dp-home" aria-label="水平归中" title="水平归中">⌖</button>
+                <button type="button" data-dx="1" data-dz="0" aria-label="右">→</button>
+                <button type="button" data-dx="-1" data-dz="1" aria-label="左后">↙</button>
+                <button type="button" data-dx="0" data-dz="1" aria-label="后">↓</button>
+                <button type="button" data-dx="1" data-dz="1" aria-label="右后">↘</button>
+              </div>
+            </div>
+            <div class="mp-col">
+              <div class="mp-sec-t">垂直升降</div>
+              <div class="mp-lift">
+                <button type="button" id="btnLiftUp">↑ 升高</button>
+                <button type="button" id="btnLiftDown">↓ 降低</button>
+              </div>
+              <div class="mp-sec-t mp-gap">水平旋转</div>
+              <div class="mp-yaw">
+                <button type="button" id="yawLeft" aria-label="逆时针旋转">↺</button>
+                <b id="tfYawVal">0°</b>
+                <button type="button" id="yawRight" aria-label="顺时针旋转">↻</button>
+              </div>
+              <input type="range" id="rngYaw" min="-180" max="180" step="1" value="0" aria-label="水平旋转角度">
+            </div>
+          </div>
+
+          <button type="button" class="mp-reset" id="btnTfReset">↺ 复位模型</button>
+          <p class="mp-tips">拖拽 3D 箭头 / 绿环 · 视口空白处拖拽八向移动<br>Shift 升降 · Alt 旋转 · 方向键微调 · Q / E 旋转 · R 复位</p>
+        </div>
+      </div>
+
+      <div class="tf-hud" id="tfHud"><span id="tfHudTxt">X +0.0  Y +0.0  Z +0.0 m   ↻ 0°</span></div>
+
+      <div class="view-badge" id="viewBadge">
+        <span class="dot"></span><span id="viewBadgeTxt">透视视图</span>
+      </div>
+
+      <!-- 运行仿真状态条 -->
+      <div class="sim-strip" id="simStrip" hidden>
+        <span class="ss-live"><i></i>运行仿真</span>
+        <span class="ss-task" id="ssTask">等待任务…</span>
+        <span class="ss-clock" id="ssClock">00:00</span>
+        <span class="ss-rate" id="ssRate">在库率 —</span>
+      </div>
+
+      <div class="viewport-tip" id="viewportTip">
+        第一次点击模型显示<b>晶格框块</b> · 再次点击可选中<b>具体个体</b>并弹出对应控制面板
+      </div>
+
+      <div class="drag-hud" id="dragHud">
+        <span class="dh-axis" id="dhAxis">↕</span>
+        <span class="dh-main" id="dhMain">高度 6 层</span>
+        <span class="dh-sub" id="dhSub">总货位 440 位</span>
+      </div>
+
+      <div class="sel-card" id="selCard" hidden>
+        <div class="sel-hd">
+          <span class="sel-dot"></span>
+          <strong id="selTitle">货位信息</strong>
+          <button type="button" id="selClose" aria-label="关闭">✕</button>
+        </div>
+        <div class="sel-body" id="selBody"></div>
+        <!-- 货位轴距：依据货架模型自适应，也可人工微调 -->
+        <div class="sel-pitch" id="selPitchWrap">
+          <div class="sel-pitch-t">货位轴距 <em id="selPitchMode">自适应</em></div>
+          <div class="sel-pitch-row">
+            <label for="selPitchX">横向 X</label>
+            <input type="number" id="selPitchX" min="1.2" max="2" step="0.01" value="1.40" aria-label="货位横向轴距（米）">
+            <span class="sel-pitch-u">m</span>
+            <label for="selPitchZ">纵向 Z</label>
+            <input type="number" id="selPitchZ" min="1.0" max="1.3" step="0.01" value="1.05" aria-label="货位纵向轴距（米）">
+            <span class="sel-pitch-u">m</span>
+          </div>
+          <button type="button" class="sel-pitch-auto" id="selPitchAuto">↻ 按货架模型自适应</button>
+          <p class="sel-pitch-tip">默认随货架列 / 排数自动取合理尺寸；手动改动后以手动值为准，货位与货物会即时重排。</p>
+        </div>
+        <div class="sel-kind" id="selKindWrap">
+          <label for="selKind">本货位货物</label>
+          <select id="selKind" aria-label="本货位货物种类"></select>
+        </div>
+        <div class="sel-kind sel-class" id="selClassWrap">
+          <label for="selClass">本货位托盘大类</label>
+          <select id="selClass" aria-label="本货位货物大类"></select>
+        </div>
+        <button type="button" class="sel-toggle" id="selToggle">切换占用状态</button>
+      </div>
+
+      <!-- 上下文控制面板：靠近选中对象弹出、不遮挡模型；内容直接复用右侧对应控制卡 -->
+      <div class="ctx-panel" id="ctxPanel" hidden>
+        <div class="ctx-hd">
+          <span class="ctx-ico">⬡</span>
+          <div class="ctx-hd-t"><strong id="ctxTitle">整体模型</strong><small id="ctxSub">晶格控制 · 运行仿真</small></div>
+          <button type="button" id="ctxClose" aria-label="关闭控制面板">✕</button>
+        </div>
+        <div class="ctx-tabs" id="ctxTabs" hidden></div>
+        <div class="ctx-body" id="ctxBody"></div>
+        <div class="ctx-foot" id="ctxFoot">再次点击模型可选中具体个体 · 点击空白处关闭</div>
+      </div>
+
+      <!-- 输送设备控制面板（运行时自动停靠到右侧「库体概览」位置） -->
+      <div class="dev-panel" id="devPanel" hidden>
+        <div class="dp-hd">
+          <span class="dp-ico">⬢</span>
+          <div class="dp-hd-t"><strong id="dpTitle">输送设备</strong><small id="dpSub">待机</small></div>
+          <button type="button" id="dpClose" aria-label="关闭设备面板">✕</button>
+        </div>
+        <div class="dp-body">
+          <!-- 所有设备通用：90° 旋转 / 复制 / 删除，常驻显示 -->
+          <div id="dpUniversal">
+            <div class="dp-row dp-row-three">
+              <button type="button" class="dp-btn" id="dpRot90" title="旋转 90°">↻ 旋转 90°</button>
+              <button type="button" class="dp-btn" id="dpCopy" title="Ctrl + V">⧉ 复制设备</button>
+              <button type="button" class="dp-btn dp-danger" id="dpDel" title="Delete">✕ 删除设备</button>
+            </div>
+            <p class="dp-note">快捷键：<b>Ctrl + V</b> 复制 · <b>Delete</b> 删除（选中设备后即可用）</p>
+          </div>
+          <!-- 控制按钮在上 -->
+          <div id="dpCommon">
+            <div class="dp-row"><button type="button" class="dp-btn dp-primary" id="dpEdit">✥ 进入编辑模式</button><button type="button" class="dp-btn" id="dpFocus">◎ 聚焦</button></div>
+            <div id="dpLevelRow">
+              <div class="dp-sec-t">层间上下移动 <em id="dpLevelHint">需先放置钢平台</em></div>
+              <div class="dp-row"><button type="button" class="dp-btn" id="dpUp">↑ 升高一层</button><button type="button" class="dp-btn" id="dpDown">↓ 降低一层</button></div>
+            </div>
+          </div>
+
+          <!-- 提升机专属：层数 / 高度 / 匹配层间输送线模型（库内提升机与设备栏提升机共用） -->
+          <div id="dpLift" hidden>
+            <div class="dp-sec-t">提升机层数 <em id="dpLvVal">6 层</em></div>
+            <div class="dp-row"><button type="button" class="dp-btn" id="dpLvMinus">− 减少一层</button><button type="button" class="dp-btn" id="dpLvPlus">＋ 增加一层</button></div>
+            <div class="dp-sec-t">塔身加高 <em id="dpBoostVal">+0.00 m</em></div>
+            <div class="dp-row"><button type="button" class="dp-btn" id="dpBoostMinus">− 降低</button><button type="button" class="dp-btn" id="dpBoostPlus">＋ 升高</button></div>
+            <div class="dp-row"><button type="button" class="dp-btn" id="dpLiftSide">⇅ 切换到货架对面</button></div>
+            <div class="dp-row"><button type="button" class="dp-btn dp-match" id="dpMatch">⇄ 匹配层间输送线模型</button></div>
+            <p class="dp-note" id="dpMatchHint">把提升机拖到靠近子通道口的格子后可用；点击后清空该子通道每层货物、铺层间输送线并对接最近主通道。</p>
+          </div>
+
+          <!-- 钢平台专属：单块板，指定层 / 方位 / 实体或轮廓（无层间上下移动） -->
+          <div id="dpPlat" hidden>
+            <div class="dp-sec-t">所在层 <em id="dpDeckVal">第 1 层</em></div>
+            <div class="dp-row"><button type="button" class="dp-btn" id="dpDeckMinus">− 下一层</button><button type="button" class="dp-btn" id="dpDeckPlus">＋ 上一层</button></div>
+            <div class="dp-sec-t">摆放方位</div>
+            <div class="dp-row dp-four">
+              <button type="button" class="dp-btn" data-side="front">前</button>
+              <button type="button" class="dp-btn" data-side="back">后</button>
+              <button type="button" class="dp-btn" data-side="left">左</button>
+              <button type="button" class="dp-btn" data-side="right">右</button>
+            </div>
+            <div class="dp-row"><button type="button" class="dp-btn" id="dpSolid">◧ 实体显示</button><button type="button" class="dp-btn" id="dpOutline">▢ 仅轮廓线</button></div>
+            <div class="dp-row"><button type="button" class="dp-btn dp-snap" id="dpPlatJoin">⇄ 与相邻钢平台贴合</button></div>
+          </div>
+
+          <!-- 墙面：三轴滑动轴 + 复制 / 90° 旋转 / 删除；默认贴地、外边缘磁吸 -->
+          <div id="dpWall" hidden>
+            <div class="dp-sec-t">宽度 <em id="dpWallWVal">1.80 m</em></div>
+            <input type="range" class="dp-range" id="dpWallW" min="0.4" max="30" step="0.1" value="1.8" aria-label="墙体宽度">
+            <div class="dp-sec-t">高度 <em id="dpWallHVal">2.40 m</em></div>
+            <input type="range" class="dp-range" id="dpWallH" min="0.4" max="40" step="0.1" value="2.4" aria-label="墙体高度">
+            <div class="dp-sec-t">厚度 <em id="dpWallDVal">0.12 m</em></div>
+            <input type="range" class="dp-range" id="dpWallD" min="0.04" max="6" step="0.02" value="0.12" aria-label="墙体厚度">
+            <p class="dp-note">墙体默认贴合地面；拖动本体可移动，靠近其它墙的外边缘会自动磁吸对接。旋转 / 复制 / 删除请用上方通用按钮或快捷键。</p>
+          </div>
+
+          <!-- 发货器：淡绿点，绑定设备后按速度吐货进入输送线 -->
+          <div id="dpEmitter" hidden>
+            <div class="dp-sec-t">绑定设备 <em id="dpEmBindVal">未绑定</em></div>
+            <p class="dp-note">把发货器<b>拖到某个设备所在的网格</b>即自动绑定该设备；拖到空格则解除绑定。</p>
+            <div class="dp-sec-t">货物类型</div>
+            <select class="dp-select" id="dpEmKind" aria-label="发货器货物种类"></select>
+            <div class="dp-sec-t">货物大类</div>
+            <select class="dp-select" id="dpEmClass" aria-label="发货器货物大类"></select>
+            <div class="dp-sec-t">吐货速度 <em id="dpEmRateVal">2.5 秒/件</em></div>
+            <input type="range" class="dp-range" id="dpEmRate" min="0.4" max="12" step="0.1" value="2.5" aria-label="吐货速度">
+            <div class="dp-row"><button type="button" class="dp-btn dp-danger" id="dpEmDel">✕ 删除发货器</button></div>
+            <p class="dp-note">有发货器才会吐出货物；把它选作路线起点，发出的货物沿该路线送到货架。<b>多个终点都有货物时暂停吐货</b>。</p>
+          </div>
+
+          <!-- 收货器：红点，到达其位置的货物消失 -->
+          <div id="dpReceiver" hidden>
+            <div class="dp-sec-t">绑定设备 <em id="dpRcBindVal">未绑定</em></div>
+            <p class="dp-note">把收货器<b>拖到某个设备所在的网格</b>即自动绑定该设备；拖到空格则解除绑定。</p>
+            <div class="dp-sec-t">收货统计 <em id="dpRcCount">0 件</em></div>
+            <div class="dp-row"><button type="button" class="dp-btn dp-danger" id="dpRcDel">✕ 删除收货器</button></div>
+            <p class="dp-note">所有到达收货器位置的货物都会<b>消失</b>。存在发货器 / 收货器时，场景内货物总量不再守恒。</p>
+          </div>
+
+          <!-- 外形检测门：链条机 / 辊道机外围的镂空门，货物过中心亮 5 秒光幕 -->
+          <div id="dpGate" hidden>
+            <div class="dp-sec-t">光幕颜色 <em id="dpGateColorVal">绿色</em></div>
+            <div class="dp-row">
+              <button type="button" class="dp-btn" id="dpGateRed">● 红色光幕</button>
+              <button type="button" class="dp-btn" id="dpGateGreen">● 绿色光幕</button>
+            </div>
+            <div class="dp-row"><button type="button" class="dp-btn dp-danger" id="dpGateDel">✕ 删除检测门</button></div>
+            <p class="dp-note"><b>单片门</b>：绿色框拉高到 200%、旋转 90°，外围四边框已删除（改作拆叠盘机外形）。光幕与门平行，货物经过门中心时亮起（<b>透明度 50%、持续 5 秒</b>）。</p>
+          </div>
+
+          <!-- 单货架：主体货架同款结构 · 货位级网格自选最多 4 格 · 参数实时预览 · 最后确认 -->
+          <div id="dpSingle" hidden>
+            <div class="dp-sec-t">已选货位格 <em id="dpSrCells">0 / 4 格</em></div>
+            <div class="dp-row"><button type="button" class="dp-btn" id="dpSrPick">✥ 选格 / 重选</button><button type="button" class="dp-btn" id="dpSrClear">清空选格</button></div>
+            <div class="dp-sec-t">层数 <em id="dpSrLvVal">2 层</em></div>
+            <div class="dp-row"><button type="button" class="dp-btn" id="dpSrLvMinus">− 减少一层</button><button type="button" class="dp-btn" id="dpSrLvPlus">＋ 增加一层</button></div>
+            <div class="dp-sec-t">层距 <em id="dpSrPitchVal">1.25 m</em></div>
+            <div class="dp-row"><button type="button" class="dp-btn" id="dpSrPitchMinus">− 缩小</button><button type="button" class="dp-btn" id="dpSrPitchPlus">＋ 放大</button></div>
+            <div class="dp-sec-t">货物</div>
+            <div class="dp-row"><button type="button" class="dp-btn" id="dpSrCargo">▣ 有货物</button><button type="button" class="dp-btn" id="dpSrKind">纸箱货物</button></div>
+            <div class="dp-row"><button type="button" class="dp-btn dp-primary" id="dpSrConfirm">✓ 确认生成货架</button><button type="button" class="dp-btn dp-danger" id="dpSrDel">✕ 删除</button></div>
+            <p class="dp-note">点设备后在<b>货位级网格</b>（与主体货位同尺寸、对齐）自选最多 4 格；选格与参数改动都会<b>实时生成预览</b>，确认后才落定并自动贴合主体货架。不占设备网格名额。</p>
+          </div>
+
+          <!-- 设备信息在下 -->
+          <div class="dp-sec-t dp-info-t">设备信息</div>
+          <div class="dp-info" id="dpInfo"></div>
+          <p class="dp-tip" id="dpTip"></p>
+        </div>
+      </div>
+
+      <div class="eq-hud" id="eqHud">吸附格子</div>
+      <div class="rt-hud" id="routeHud">路线设计</div>
+
+      <!-- 视图开关：压缩淡化，竖排放在视口左下角 -->
+      <div class="view-mini" id="viewMini" role="group" aria-label="视图显示开关">
+        <button type="button" class="vm-btn is-on" id="btnCrystal" aria-pressed="true" title="晶格视图">◇<span>晶格</span></button>
+        <button type="button" class="vm-btn is-on" id="btnFrame" aria-pressed="true" title="货架结构">▤<span>结构</span></button>
+        <button type="button" class="vm-btn is-on" id="btnCargo" aria-pressed="true" title="在库货物">▣<span>货物</span></button>
+        <span class="vm-sep"></span>
+        <button type="button" class="vm-btn" id="btnFit" title="适应视图">⛶<span>适应</span></button>
+      </div>
+
+      <div class="loading" id="loading"><div class="spinner"></div><span>正在构建四向库模型…</span></div>
+    </section>
+
+    <aside class="sidebar" id="sidebar">
+      <div class="side-head side-head-slim">
+        <div class="side-title">控制面板 <small>具体选项在顶栏「⚙ 控制」中展开</small></div>
+      </div>
+      <div class="panel-scroll" id="panelScroll">
+
+        <!-- 运行仿真（融入「整体模型」上下文面板） -->
+        <section class="card card-sim" id="cardSim" hidden>
+          <div class="card-hd">
+            <div><h2>运行仿真</h2><p class="card-sub">提升机送货 → 层间输送线静置 → 四向车接驳入库</p></div>
+            <span class="pill pill-sim" id="simPill">已暂停</span>
+          </div>
+          <div class="sim-ctl">
+            <button type="button" class="sim-btn sim-primary" id="simPlay" aria-pressed="false">▶ 播放</button>
+            <button type="button" class="sim-btn" id="simStop" title="统计清零、设备回位">↺ 复位</button>
+          </div>
+          <div class="sim-loop">
+            <button type="button" class="sim-btn sim-loop-btn" id="simLoop" aria-pressed="false">⇄ 返程循环：关</button>
+            <span class="sim-loop-tip" id="simLoopTip">默认货物到终点后静止；开启后原路返回</span>
+          </div>
+          <div class="sim-tpl">
+            <button type="button" class="sim-btn sim-tpl-btn" id="simTemplate">＋ 一键添加 / 识别输送线</button>
+            <span class="sim-tpl-state" id="simTemplateState">尚未识别输送线路模板</span>
+            <p class="sim-tpl-tip">已搭好线路时直接<b>识别为模板</b>（不改动其它设备）；空场景则按「提升机正面口 → 3 台辊道 → 转弯位<b>移载机</b> → 转向后辊道」搭建，拆叠盘机只做空托盘工位、不参与转向。生成<b>入库 / 出库</b>两条路线，仿真严格<b>依据路线</b>并由真实四向车 / 提升机 / 输送设备承载货物；后续改动布局以后续布局为准。</p>
+          </div>
+          <div class="sim-seg" id="simSpeed" role="group" aria-label="仿真倍速">
+            <span>倍速</span>
+            <button type="button" data-sp="0.5">0.5×</button>
+            <button type="button" data-sp="1" class="is-on">1×</button>
+            <button type="button" data-sp="2">2×</button>
+            <button type="button" data-sp="4">4×</button>
+          </div>
+          <div class="sim-seg" id="simMode" role="group" aria-label="作业模式">
+            <span>作业</span>
+            <button type="button" data-mode="auto" class="is-on">自动混合</button>
+            <button type="button" data-mode="in">仅入库</button>
+            <button type="button" data-mode="out">仅出库</button>
+          </div>
+          <div class="sim-clock"><b id="simClock">00:00</b><em>仿真时钟</em></div>
+          <div class="sim-stats">
+            <div><b id="simIn">0</b><span id="simInLabel">送达线终点</span></div>
+            <div><b id="simOut">0</b><span id="simOutLabel">层间调拨</span></div>
+            <div><b id="simRate">0%</b><span id="simRateLabel">线终点存量</span></div>
+            <div><b id="simThru">0</b><span>板/H</span></div>
+          </div>
+          <div class="sim-sub" id="simSub">守恒作业 · 货物总量恒定</div>
+          <div class="sim-sub sim-cons" id="simStatsLabel">守恒作业 · 货物总量恒定</div>
+          <div class="sim-sec-t">设备状态 <em id="simDevCount">0 台车 / 0 台提升机</em></div>
+          <div class="sim-devices" id="simDevices"></div>
+        </section>
+
+        <!-- 快速建构 -->
+        <section class="card card-primary" id="cardQuick" hidden>
+          <div class="card-hd">
+            <div><h2>快速建构</h2><p class="card-sub">滑块调整，或直接拖拽 3D 控制点</p></div>
+            <span class="pill pill-live">实时</span>
+          </div>
+
+          <div class="quick" id="quickLen">
+            <div class="quick-top">
+              <div class="quick-label"><span class="axis axis-x"></span>长度 <small>BAY 列数</small></div>
+              <div class="quick-val"><b id="valLen">12</b><em>列</em></div>
+            </div>
+            <div class="quick-ctl">
+              <button type="button" class="step" data-act="len:-1" aria-label="减少一列">−</button>
+              <input type="range" id="rngLen" min="2" max="40" step="1" value="12" aria-label="长度列数">
+              <button type="button" class="step" data-act="len:+1" aria-label="增加一列">＋</button>
+            </div>
+            <div class="quick-foot"><span id="dimLen">16.8 m</span><span class="dim-sep">·</span><span id="subLen">分段 6 / 6</span></div>
+          </div>
+
+          <div class="quick" id="quickWid">
+            <div class="quick-top">
+              <div class="quick-label"><span class="axis axis-z"></span>宽度 <small>储区排数</small></div>
+              <div class="quick-val"><b id="valWid">6</b><em>排</em></div>
+            </div>
+            <div class="quick-ctl">
+              <button type="button" class="step" data-act="wid:-1" aria-label="减少一排">−</button>
+              <input type="range" id="rngWid" min="3" max="24" step="1" value="6" aria-label="宽度排数">
+              <button type="button" class="step" data-act="wid:+1" aria-label="增加一排">＋</button>
+            </div>
+            <div class="quick-foot"><span id="dimWid">9.5 m</span><span class="dim-sep">·</span><span id="subWid">储区 1 / 4 / 1</span></div>
+          </div>
+
+          <div class="quick" id="quickHei">
+            <div class="quick-top">
+              <div class="quick-label"><span class="axis axis-y"></span>高度 <small>层数</small></div>
+              <div class="quick-val"><b id="valHei">6</b><em>层</em></div>
+            </div>
+            <div class="quick-ctl">
+              <button type="button" class="step" data-act="hei:-1" aria-label="减少一层">−</button>
+              <input type="range" id="rngHei" min="2" max="12" step="1" value="6" aria-label="高度层数">
+              <button type="button" class="step" data-act="hei:+1" aria-label="增加一层">＋</button>
+            </div>
+            <div class="quick-foot"><span id="dimHei">8.5 m</span><span class="dim-sep">·</span><span id="subHei">层距 1.25 m</span></div>
+          </div>
+
+          <div class="add-wrap">
+            <button type="button" class="btn-add" id="btnAdd" aria-haspopup="true" aria-expanded="false">＋ 添加货位</button>
+            <div class="add-menu" id="addMenu" hidden>
+              <button type="button" data-add="col">增加一列 BAY <small>+<span id="addColN">36</span> 位</small></button>
+              <button type="button" data-add="row">增加一排储位 <small>+<span id="addRowN">72</span> 位</small></button>
+              <button type="button" data-add="level">增加一层 <small>+<span id="addLevN">72</span> 位</small></button>
+              <button type="button" data-add="aisle">增加一条主巷道 <small>重排深度</small></button>
+              <button type="button" data-add="bulk">批量加 5 列 <small>快速扩库</small></button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 货位货物种类 -->
+        <section class="card card-cargo" id="cardCargo" hidden>
+          <div class="card-hd">
+            <div><h2>货位货物</h2><p class="card-sub">选择货位种类，实时切换货物贴图</p></div>
+            <span class="pill pill-cargo" id="cargoPill">混放</span>
+          </div>
+          <div class="cargo-grid" id="cargoGrid" role="group" aria-label="货位货物种类"></div>
+          <div class="cargo-class-t">货物大类 <em id="cargoClassPill">无托盘单货物</em></div>
+          <div class="cargo-class-grid" id="cargoClassGrid" role="group" aria-label="货物大类"></div>
+          <div class="cargo-dist" id="cargoDist" aria-label="货物分布"></div>
+          <div class="cargo-foot">
+            <span id="cargoSummary">正在统计在库货物…</span>
+            <button type="button" id="btnCargoClear" title="清除所有单独指定的货位种类">清除单货位设置</button>
+          </div>
+        </section>
+
+        <!-- 四向穿梭车：点击 3D 中的车后换色（结构贴图不变，仅换主色） -->
+        <section class="card card-shuttle" id="cardShuttle" hidden>
+          <div class="card-hd">
+            <div><h2>四向穿梭车</h2><p class="card-sub">换颜色 · 车身贴图结构不变</p></div>
+            <span class="pill" id="shuttlePill">全部车辆</span>
+          </div>
+          <div class="sh-info" id="shInfo">再次点击 3D 中的四向车，可单独给它换色；也可一键应用到全部车辆。</div>
+          <div class="sh-swatches" id="shSwatches" role="group" aria-label="四向车颜色"></div>
+          <div class="sh-row">
+            <button type="button" class="dp-btn" id="shApplyAll">◉ 应用到全部车辆</button>
+            <button type="button" class="dp-btn" id="shReset">↺ 恢复经典蓝</button>
+          </div>
+          <p class="dp-note">换色只替换车身主色渐变与台板颜色；警示条、品牌字、散热栅格、铭牌、状态灯带等贴图结构完全保留。</p>
+        </section>
+
+        <!-- 实时统计（常驻概览） -->
+        <section class="card card-overview" id="cardOverview">
+          <div class="card-hd">
+            <div><h2>库体概览</h2><p class="card-sub">依据当前参数实时计算 · 尺寸单位 m</p></div>
+          </div>
+          <div class="stats">
+            <div class="stat"><span>总货位数</span><b id="stSlots">0</b><em>位</em></div>
+            <div class="stat"><span>已占用</span><b id="stUsed">0</b><em>位</em></div>
+            <div class="stat"><span>在库率</span><b id="stRate">0</b><em>%</em></div>
+            <div class="stat"><span>提升机</span><b id="stLifts">0</b><em>台</em></div>
+          </div>
+          <div class="bar"><div class="bar-fill" id="rateBar"></div></div>
+
+          <div class="ov-sec-t">货位与层高 <em>客户关注</em></div>
+          <div class="ov-grid">
+            <div class="ov-cell"><span>货位轴距（横 × 纵）</span><b id="ovCell">—</b></div>
+            <div class="ov-cell"><span>货位净高</span><b id="ovLoadH">—</b></div>
+            <div class="ov-cell"><span>层距 / 层高</span><b id="ovPitch">—</b></div>
+            <div class="ov-cell"><span>货架层数</span><b id="ovLevels">—</b></div>
+            <div class="ov-cell"><span>一层梁面标高</span><b id="ovY0">—</b></div>
+            <div class="ov-cell"><span>单板规格 / 载重</span><b id="ovPallet">—</b></div>
+          </div>
+
+          <div class="ov-sec-t">库体与产能</div>
+          <div class="ov-grid">
+            <div class="ov-cell"><span>库体尺寸（长 × 宽 × 高）</span><b id="stDim">—</b></div>
+            <div class="ov-cell"><span>系统吞吐估算</span><b id="stThru">—</b></div>
+            <div class="ov-cell"><span>产能瓶颈</span><b id="stBott">—</b></div>
+            <div class="ov-cell"><span>穿梭车配置</span><b id="stShuttle">—</b></div>
+            <div class="ov-cell"><span>主通道 / 储区</span><b id="ovAisles">—</b></div>
+            <div class="ov-cell"><span>层间输送线接驳</span><b id="ovConv">—</b></div>
+          </div>
+          <details class="ov-fold" id="ovDevFold">
+            <summary><span>已摆放设备</span><em id="ovDevCount">0 台</em><span class="chev">⌄</span></summary>
+            <div class="eq-sec-t">设备列表 <em id="equipClear" class="eq-clear">清空</em></div>
+            <div class="eq-list" id="equipList"></div>
+          </details>
+          <details class="ov-fold" id="ovBuiltinFold">
+            <summary><span>库内固定设备</span><em>名称与编号</em><span class="chev">⌄</span></summary>
+            <div class="eq-builtin-list" id="equipBuiltin"></div>
+          </details>
+        </section>
+
+        <!-- 停靠位：选中物体时隐藏上面的「库体概览」，同位置显示对应控制面板；
+             点击空白 / 取消选中即恢复库体概览。 -->
+        <div class="side-dock" id="sideDock" hidden></div>
+
+        <!-- 结构参数 -->
+        <section class="card" id="cardStructure" hidden>
+          <details open>
+            <summary><h2>结构参数</h2><span class="chev">⌄</span></summary>
+            <div class="fields" id="fStructure"></div>
+          </details>
+        </section>
+
+        <!-- 设备参数 -->
+        <section class="card" id="cardDevice" hidden>
+          <details open>
+            <summary><h2>设备与效率</h2><span class="chev">⌄</span></summary>
+            <div class="fields" id="fDevice"></div>
+          </details>
+        </section>
+
+        <!-- 货物与外观 -->
+        <section class="card" id="cardVisual" hidden>
+          <details open>
+            <summary><h2>货物与外观</h2><span class="chev">⌄</span></summary>
+            <div class="fields" id="fVisual"></div>
+          </details>
+        </section>
+
+        <!-- 输送设备系统（目录 / 已摆放设备 / 库内固定设备） -->
+        <section class="card card-equip" id="cardEquip" hidden>
+          <div class="card-hd">
+            <div><h2>设备面板</h2><p class="card-sub">选中即在库体地面同高摆放，可编辑吸附</p></div>
+            <span class="pill pill-eq" id="equipCount">0 台</span>
+          </div>
+          <div class="eq-sec-t">全部设备 <em>点击摆放</em></div>
+          <div class="eq-catalog" id="equipCatalog"></div>
+          <div class="eq-legend">
+            <span><i class="lg-free"></i>空闲格子</span>
+            <span><i class="lg-rec"></i>推荐接驳位</span>
+            <span><i class="lg-busy"></i>已占用</span>
+            <span><i class="lg-plat"></i>钢平台</span>
+          </div>
+          <p class="eq-hint">点击上方设备即可摆放；移动网格<b>围绕库体四周共 10 层</b>。已摆放设备与库内固定设备已折叠到「库体概览」中。</p>
+        </section>
+
+        <!-- 输送线路线设计：起点 → 中间路径(可选) → 终点；无直达设备时货物掉落 -->
+        <section class="card card-routes" id="cardRoutes" hidden>
+          <div class="card-hd">
+            <div><h2>输送线路线设计</h2><p class="card-sub">衔接输送设备与运行仿真 · 掉落物理</p></div>
+            <span class="pill pill-rt" id="rtCount">0 条路线</span>
+          </div>
+          <div class="rt-bar">
+            <button type="button" class="rt-btn rt-primary" id="rtNew">＋ 新建路线</button>
+            <button type="button" class="rt-btn" id="rtCancel">✕ 取消</button>
+          </div>
+          <!-- 点位按钮：仅「新建路线」后的当前序列可见，且需从面板拖到 3D 场景 -->
+          <div class="rt-point-tools" id="rtPointTools" hidden>
+            <p class="rt-pt-tip"><b>起点</b>融合货物 / <b>途经点</b>融合设备 / <b>终点</b>＝目的地网格；三点齐备自动生成小绿点路径，点位不占网格名额</p>
+            <p class="rt-pt-keys">选中点位后按<b>方向键</b>每次移动 1 个立体网格：← → 沿 X、↑ ↓ 沿 Z、<b>Shift + ↑ / ↓</b> 换一层；绑定的设备 / 货架格会异色高亮</p>
+            <div class="rt-pt rt-pt-start" data-pt="start" id="rtDragStart"><b>① 起点</b><small>拖到货物上接驳</small></div>
+            <div class="rt-pt rt-pt-via" data-pt="via" id="rtDragVia"><b>② 途经点</b><small>拖到设备上 · 无限次</small></div>
+            <div class="rt-pt rt-pt-end" data-pt="end" id="rtDragEnd"><b>③ 终点</b><small>拖到空白网格</small></div>
+          </div>
+          <div class="rt-name">
+            <label for="rtName">路线名称</label>
+            <input type="text" id="rtName" maxlength="40" placeholder="路线名称可编辑" aria-label="路线名称">
+          </div>
+          <div class="rt-hint" id="rtHint">点「新建路线」后才会出现起点 / 途经点 / 终点按钮</div>
+          <div class="rt-sec-t">当前序列点位 <em id="rtNodeCount">0 个点位</em><em id="rtDots" class="rt-dots">待三点齐备</em></div>
+          <div class="rt-nodes" id="rtNodes"></div>
+          <div class="rt-bar"><button type="button" class="rt-btn rt-ok" id="rtDone">✓ 完成路线</button></div>
+          <div class="rt-sec-t">显示与循环 <em>隐藏不影响功能</em></div>
+          <div class="rt-bar rt-bar-view">
+            <button type="button" class="rt-btn" id="rtLoop" aria-pressed="false">↻ 循环：关</button>
+            <button type="button" class="rt-btn is-on" id="rtHideLine" aria-pressed="true">▦ 路线显示</button>
+            <button type="button" class="rt-btn is-on" id="rtHideTerminals" aria-pressed="true">◉ 收发器显示</button>
+          </div>
+          <div class="rt-run-state" id="rtKeyState">未选中点位 · 点上方点位条目或 3D 标记球即可用方向键微调</div>
+          <div class="rt-sec-t">中间搬运方式 <em>人物 / 叉车后续设计</em></div>
+          <select id="rtCarrier" class="rt-select" aria-label="搬运方式">
+            <option value="none">无（货物掉到下一个网格地面）</option>
+            <option value="person">人物搬运（后续设计，暂按掉落）</option>
+            <option value="forklift">叉车搬运（后续设计，暂按掉落）</option>
+          </select>
+          <div class="rt-sec-t">已保存路线 <em id="rtClear" class="rt-clear">清空</em></div>
+          <div class="rt-list" id="rtList"></div>
+          <div class="rt-bar rt-bar-run">
+            <button type="button" class="rt-btn rt-play-btn" id="rtPlay">▶ 运行路线</button>
+            <button type="button" class="rt-btn" id="rtStop">⏹ 停止 / 复位</button>
+          </div>
+          <div class="rt-run-state" id="rtRunState">待机</div>
+          <div class="rt-legend">
+            <span><i class="lg-ok"></i>小绿点成线 · 自动计算的运输路径</span>
+            <span><i class="lg-drop"></i>无输送线接 · 掉到地面并保留</span>
+          </div>
+          <div class="rt-profiles" id="rtProfiles"></div>
+          <p class="rt-tip">货物严格按设备职能流转：<b>货架内水平移动＝四向车接驳</b>、<b>上下移动＝提升机转运</b>、<b>货架外＝输送设备运输</b>，绝不直线飘过去。没有输送线接时，货物超出设备末端后<b>掉到下一个网格的地面并静止保留，不会凭空消失</b>。人物 / 叉车搬运设备后面再设计，当前只预留接口。<b>Alt + 左键拖动</b>在任何场景下都只旋转视角。</p>
+        </section>
+
+      </div>
+    </aside>
+  </main>
+
+  <footer class="statusbar">
+    <div class="sb-left"><span class="sb-item"><i class="sb-dot"></i><span id="sbMode">旋转模式</span></span><span class="sb-item" id="sbSel">未选中对象</span></div>
+    <div class="sb-right"><span class="sb-item" id="sbCam">视角 —</span><span class="sb-item" id="sbFps">— FPS</span><span class="sb-item">Eavan-立库仿真系统</span></div>
+  </footer>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="vendor/three.min.js"></script>
+<script src="js/core.js"></script>
+<script src="js/materials.js"></script>
+<script src="js/scene.js"></script>
+<script src="js/rack.js"></script>
+<script src="js/handles.js"></script>
+<script src="js/transform.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/equipment.js"></script>
+<script src="js/routes.js"></script>
+<script src="js/flow.js"></script>
+<script src="js/terminals.js"></script>
+<script src="js/carrier.js"></script>
+<script src="js/pallets.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
