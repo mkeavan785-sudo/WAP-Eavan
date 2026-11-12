@@ -1,0 +1,8 @@
+# 本地调试产物 / 临时验证脚本与截图（不进入线上仓库）
+_*.png
+_*.jpg
+_*.js
+_verify*/
+*.log
+.DS_Store
+Thumbs.db
