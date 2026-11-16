@@ -16,6 +16,7 @@
     raycaster: null, v2: null,
     ctrl: { target: null, radius: 48, theta: 0.78, phi: 1.02, minR: 4, maxR: 260 },
     drag: null, mode: 'rotate', prevMode: 'rotate',
+    pointers: {}, pinch: null,     /* 触屏多点跟踪：全部活动指针 + 双指捏合状态 */
     onPick: null, onFrame: null, onMode: null, onTick: null, lastT: 0,
     onHandleDown: null, onHandleMove: null, onBeforeRender: null,
     onEquipDown: null, onEquipMove: null,
@@ -181,8 +182,35 @@
     var el = S.canvas;
     el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
+    /* 触屏双指捏合：取最后按下的两个指针，记录初始间距与质心 */
+    function startPinch(idA, idB) {
+      var a = S.pointers[idA], b = S.pointers[idB];
+      if (!a || !b) return;
+      S.drag = null;
+      el.style.cursor = 'grab';
+      S.pinch = {
+        a: idA, b: idB,
+        dist: Math.hypot(a.x - b.x, a.y - b.y),
+        cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2
+      };
+    }
+
     el.addEventListener('pointerdown', function (e) {
       if (e.button > 2) return;
+      S.pointers[e.pointerId] = { x: e.clientX, y: e.clientY, biz: false };
+      try { el.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      /* 第二根手指：业务拖拽（采点 / 设备 / 晶格 / 变换）占用时不进入捏合；
+         普通相机拖拽则升级为捏合（S.drag 在 startPinch 内清空）。
+         PC 鼠标永远只有单指针，此分支不会被触发，行为完全不变。 */
+      var list = Object.keys(S.pointers);
+      if (list.length >= 2) {
+        var busy = list.some(function (id) { return S.pointers[id] && S.pointers[id].biz; });
+        if (!busy && !S.pinch && S.mode !== 'object') {
+          var tail = list.slice(-2);
+          startPinch(+tail[0], +tail[1]);
+        }
+        return;
+      }
       /* Alt + 左键：贯穿所有场景（普通 / 编辑 / 采点 / 模型变换）只旋转视角，
          跳过全部业务钩子，不触发任何选中、拖拽或点位操作。 */
       if (e.button === 0 && e.altKey) {
@@ -190,28 +218,46 @@
           id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY,
           button: 0, moved: 0, panning: false, altRotate: true
         };
-        try { el.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
         el.style.cursor = 'grabbing';
         return;
       }
       /* 输送线路线设计：采点状态优先于一切（不改动其它模式的既有交互） */
-      if (e.button === 0 && S.onRouteDown && S.onRouteDown(e)) return;
+      if (e.button === 0 && S.onRouteDown && S.onRouteDown(e)) { S.pointers[e.pointerId].biz = true; return; }
       /* 模型变换模式：左键一律由 transform 接管（Gizmo 或自由拖拽） */
-      if (e.button === 0 && S.mode === 'object' && S.onTransformDown && S.onTransformDown(e)) return;
+      if (e.button === 0 && S.mode === 'object' && S.onTransformDown && S.onTransformDown(e)) { S.pointers[e.pointerId].biz = true; return; }
       /* 输送设备系统：选中 / 编辑拖拽优先于相机操作 */
-      if (e.button === 0 && S.onEquipDown && S.onEquipDown(e)) return;
+      if (e.button === 0 && S.onEquipDown && S.onEquipDown(e)) { S.pointers[e.pointerId].biz = true; return; }
       /* 晶格尺寸控制点优先 */
-      if (S.onHandleDown && S.onHandleDown(e)) return;
+      if (S.onHandleDown && S.onHandleDown(e)) { S.pointers[e.pointerId].biz = true; return; }
       S.drag = {
         id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY,
         button: e.button, moved: 0,
         panning: e.button === 2 || e.button === 1 || e.shiftKey
       };
-      try { el.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
       el.style.cursor = (S.drag.panning || S.mode === 'move') ? 'grabbing' : 'grab';
     });
 
     el.addEventListener('pointermove', function (e) {
+      var rec = S.pointers[e.pointerId];
+      if (rec) { rec.x = e.clientX; rec.y = e.clientY; }
+      /* 双指捏合：间距变化 → 缩放；质心位移 → 平移（标准触屏相机手势） */
+      if (S.pinch) {
+        if (e.pointerId === S.pinch.a || e.pointerId === S.pinch.b) {
+          var pa = S.pointers[S.pinch.a], pb = S.pointers[S.pinch.b];
+          if (pa && pb) {
+            var nd = Math.hypot(pa.x - pb.x, pa.y - pb.y);
+            if (nd > 0 && S.pinch.dist > 0) {
+              S.ctrl.radius *= S.pinch.dist / nd;
+              applyCamera();
+            }
+            S.pinch.dist = nd;
+            var cx = (pa.x + pb.x) / 2, cy = (pa.y + pb.y) / 2;
+            pan(cx - S.pinch.cx, cy - S.pinch.cy);
+            S.pinch.cx = cx; S.pinch.cy = cy;
+          }
+        }
+        return;   /* 双指期间不触发业务悬停与单指相机 */
+      }
       if (!S.drag && S.onRouteMove && S.onRouteMove(e)) return;
       if (!S.drag && S.onEquipMove && S.onEquipMove(e)) return;
       if (!S.drag && S.onTransformMove && S.onTransformMove(e)) return;
@@ -243,11 +289,26 @@
     });
 
     var end = function (e) {
+      var rec = S.pointers[e.pointerId];
+      delete S.pointers[e.pointerId];
+      try { el.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      if (S.pinch) {
+        if (e.pointerId === S.pinch.a || e.pointerId === S.pinch.b) {
+          S.pinch = null;
+          /* 双指松开一指：剩余单指无缝接管为相机拖拽（moved 置大防误触选中） */
+          var rest = Object.keys(S.pointers);
+          if (rest.length === 1 && !S.pointers[rest[0]].biz && !S.drag) {
+            var r0 = S.pointers[rest[0]];
+            S.drag = { id: +rest[0], x: r0.x, y: r0.y, sx: r0.x, sy: r0.y, button: 0, moved: 99, panning: false };
+            el.style.cursor = 'grabbing';
+          }
+        }
+        return;
+      }
       var d = S.drag;
       if (!d || d.id !== e.pointerId) return;
       S.drag = null;
       el.style.cursor = 'grab';
-      try { el.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
       if (d.button === 0 && d.moved < 5 && !d.altRotate && S.mode !== 'object' && S.onPick) {
         var r = el.getBoundingClientRect();
         S.v2.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
@@ -310,6 +371,35 @@
     S.ctrl.radius = Math.max(10, need * 1.14 + sy * 0.30);
     var p = S.modelRoot.position;
     S.ctrl.target.set(p.x, sy * 0.42 + p.y, p.z);
+    lastGrow = null;   /* 绝对取景后重置自适应基线，下一次尺寸变化重新起步 */
+    applyCamera();
+  }
+
+  /* 触屏自适应跟镜（手机 / 平板专用，PC 端不调用）：
+     库体尺寸变化时按增量等比例拉远 / 拉近——保留用户手动缩放与旋转，
+     只叠加尺寸变化对应的距离增量；竖屏（aspect<1）按水平视场角补足拉远量；
+     force 直接重新取景（模式切换 / 横竖屏翻转后基线重置）。 */
+  var lastGrow = null;
+  function growFit(size, force) {
+    var sx = size[0], sy = size[1], sz = size[2];
+    var fov = S.camera.fov * Math.PI / 180;
+    var half = Math.max(sx, sz) / 2;
+    var aspect = S.camera.aspect || 1;
+    var need = half / Math.tan(fov / 2) / Math.min(1, aspect);
+    var R = Math.max(10, Math.min(S.ctrl.maxR, need * 1.14 + sy * 0.30));
+    var ty = sy * 0.42 + S.modelRoot.position.y;
+    if (force || !lastGrow) {
+      S.ctrl.radius = Math.max(S.ctrl.minR, R);
+      S.ctrl.target.y = Math.max(0.2, ty);
+      lastGrow = { r: R, ty: ty };
+      applyCamera();
+      return;
+    }
+    var dR = R - lastGrow.r, dY = ty - lastGrow.ty;
+    lastGrow = { r: R, ty: ty };
+    if (Math.abs(dR) < 0.01 && Math.abs(dY) < 0.01) return;
+    S.ctrl.radius = Math.max(S.ctrl.minR, Math.min(S.ctrl.maxR, S.ctrl.radius + dR));
+    S.ctrl.target.y = Math.max(0.2, S.ctrl.target.y + dY);
     applyCamera();
   }
 
@@ -396,7 +486,7 @@
   }
 
   WAP.scene = {
-    S: S, init: init, resize: resize, setMode: setMode, fit: fit, reset: reset,
+    S: S, init: init, resize: resize, setMode: setMode, fit: fit, growFit: growFit, reset: reset,
     pick: pick, pickPart: pickPart, project: project, camText: camText, applyCamera: applyCamera,
     applyTransform: applyTransform, setShadowSize: setShadowSize,
     clearModel: function () {

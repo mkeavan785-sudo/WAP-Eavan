@@ -769,7 +769,8 @@
     /* 设备状态栏：完整显示设备名称 + 编号 + 所属层 / 子通道口 + 作业状态，不省略 */
     var html = s.devices.map(function (d) {
       var idle = d.task === '—';
-      var sub = d.st + (idle ? '' : ' → ' + d.task) + (d.carry ? ' · 载货中' : '');
+      var kgTxt = d.kg != null ? (d.kg > 0 ? ' · 载重 ' + d.kg + ' kg' : ' · 空载') : '';
+      var sub = d.st + (idle ? '' : ' → ' + d.task) + (d.carry ? ' · 载货中' : '') + kgTxt;
       return '<div class="sim-dev' + (idle ? ' is-idle' : '') + '" data-dev="' + esc(d.id) +
         '" title="点击聚焦 ' + esc(d.name) + '"><i></i><div class="dv-body">' +
         '<div class="dv-main"><b>' + esc(d.name) + '</b><em>' + esc(d.level) + '</em></div>' +

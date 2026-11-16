@@ -116,6 +116,7 @@
     var best = null, bd = 1e9;
     (geom().cells || []).forEach(function (c) {
       if (!c.occ || c.conv >= 0 || c.chg || c.flowReserved) return;
+      if (WAP.physics && WAP.physics.overloaded(c)) return;   // 物理模式：超载 1.5T 拒载
       var d = Math.hypot(c.x - near.x, c.z - near.z) - (c.l >= 1 ? 2.5 : 0);
       if (d < bd) { bd = d; best = c; }
     });
@@ -126,6 +127,7 @@
     var best = null, bd = 1e9;
     (geom().cells || []).forEach(function (c) {
       if (c.occ || c.conv >= 0 || c.chg || c.flowReserved) return;
+      if (WAP.physics && WAP.physics.overloaded(c)) return;   // 物理模式：超载 1.5T 拒载
       var penalty = c.l === want ? 0 : 6;
       var d = Math.hypot(c.x - near.x, c.z - near.z) + penalty + (c.rank || 0);
       if (d < bd) { bd = d; best = c; }
@@ -151,7 +153,7 @@
   function startOutbound(v) {
     var src = cellOf(v.start.cargoId);
     if (!src || !src.occ) src = pickOccupied(v.start);
-    if (!src) return null;
+    if (!src || (WAP.physics && WAP.physics.overloaded(src))) { if (WAP.physics) WAP.physics.noteOverloadBlock(); return null; }
     src.flowReserved = true;
     var kind = rack().cargoKindOf(src) || 'carton';
     var seq = [nodeFrom(v.start, { kind: 'cargo', cargoId: src.id,
@@ -176,7 +178,7 @@
   function startInbound(v) {
     var dst = cellOf(v.end.cargoId);
     if (!dst || dst.occ || dst.flowReserved) dst = pickFree(v.end, dst ? dst.l : 1);
-    if (!dst) return null;
+    if (!dst || (WAP.physics && WAP.physics.overloaded(dst))) { if (WAP.physics) WAP.physics.noteOverloadBlock(); return null; }
     var p = takePool(function (q) { return q.atLineEnd; }) || takePool();
     if (!p) return null;
     dst.flowReserved = true;
@@ -211,11 +213,11 @@
   }
   function syntheticRelocation() {
     var src = pickOccupied({ x: 0, z: geom().z0 + 1 });
-    if (!src) return null;
+    if (!src) { if (WAP.physics) WAP.physics.noteOverloadBlock(); return null; }
     var s = nearestLift(src.x, src.z);
     if (!s) return null;
     var dst = pickFree({ x: src.x, z: src.z }, src.l === 0 ? 1 : 0);
-    if (!dst) return null;
+    if (!dst) { if (WAP.physics) WAP.physics.noteOverloadBlock(); return null; }
     dst.flowReserved = true;
     var y0 = src.y, y1 = dst.y, tx = s.x, tz = s.z, cz = s.convZ;
     var mz0 = trackNearZ(src.z), mz1 = trackNearZ(dst.z);

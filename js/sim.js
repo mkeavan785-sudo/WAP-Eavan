@@ -231,19 +231,24 @@
     var tf = t.fy != null ? t.fy : a.fy;
     var dx = tx - p.x, dz = tz - p.z, df = tf - a.fy;
     var d = Math.hypot(dx, dz);
-    var v = a.carry ? a.vL : a.vE;
+    /* 物理规则仿真（默认关）：载重质量插值 V/Ta + 轴向换向驻留 2s。
+       physics 关闭时 ph = null，下列分支与原实现逐帧一致。 */
+    var ph = (WAP.physics && WAP.physics.enabled) ? WAP.physics.plan(a, d) : null;
+    if (ph && WAP.physics.turnHold(a, t, dx, dz, d, dt)) return;
+    var v = ph ? ph.V : (a.carry ? a.vL : a.vE);
     if (d > 1e-4) {
-      var s = spR(a, 'h', t, d, v, a.ramp, dt);
+      var s = spR(a, 'h', t, d, v, ph ? ph.Ta : a.ramp, dt);
       p.x += dx / d * s; p.z += dz / d * s;
     }
     if (Math.abs(df) > 1e-5) {
-      a.fy += Math.sign(df) * Math.min(Math.abs(df), 0.16 * dt);
+      a.fy += Math.sign(df) * Math.min(Math.abs(df), (ph ? WAP.physics.forkSpeed() : 0.16) * dt);
       a.fork.position.y = a.fy;
     }
     if (a.carry) a.carry.position.set(p.x, p.y + a.fy + 0.02, p.z);
 
     if (Math.abs(tx - p.x) < 1e-3 && Math.abs(tz - p.z) < 1e-3 && Math.abs(tf - a.fy) < 1e-3) {
       p.set(tx, ty, tz); a.fy = tf; a.fork.position.y = tf;
+      if (ph) WAP.physics.noteDone(a, t);
       if (t.fn) t.fn(a);
       a.wait = t.wait || 0;
       a.q.shift();
@@ -263,7 +268,10 @@
   }
   function route(a, x, z, st) {
     a.q.push({ zTrack: true, st: st || '返回主通道' });
-    a.q.push({ x: x, st: '主通道行驶' });
+    /* 物理规则仿真（默认关）：主通道段挂防撞避让 until（同向跟车 / 对向让位） */
+    var xt = { x: x, st: '主通道行驶' };
+    if (WAP.physics && WAP.physics.enabled) xt.until = WAP.physics.laneUntil(a, xt);
+    a.q.push(xt);
     a.q.push({ z: z, st: '子通道行驶', fn: function () { a.A = nearestTrack(z); } });
   }
 
@@ -383,6 +391,16 @@
       a.q.push({ wait: 1.2, st: '等待可作业货位' }); return;
     }
     var cand = base.filter(function (x) { return x.occ === !doIn; });
+    /* 物理规则仿真（默认关）：超载 1.5T 拒载 —— 超限货位报警并跳过 */
+    if (WAP.physics && WAP.physics.enabled) {
+      var ovN = cand.filter(function (x) { return WAP.physics.overloaded(x); }).length;
+      if (ovN) {
+        cand = cand.filter(function (x) { return !WAP.physics.overloaded(x); });
+        a.alarmUntil = G.t + 3;
+        log('warn', a.name + ' 超载拒载 × ' + ovN + ' 位（额定 1.5T，已跳过）');
+        if (!cand.length) { a.q.push({ wait: 2, st: '等待可作业货位' }); return; }
+      }
+    }
     /* 入库优先选最内侧 / 中间的空位；出库优先选最外侧（靠近主通道）的占用位 */
     cand.sort(function (p, q) {
       var rp = p.rank != null ? p.rank : WAP.core.storageRank(c, p.b, p.k);
@@ -431,6 +449,7 @@
             /* 货物在输送线上静止，只有四向车到达才被取走 */
             buf.obj.visible = false; buf.state = 'empty'; buf.owner = null; req.done = true;
             a.carry = makeLoad(kind, 6); G.root.add(a.carry);
+            if (WAP.physics) WAP.physics.stampLoad(a, cell);
             log('sys', a.name + ' 已在层间输送线完成接驳取货');
           }, st: '四向车接驳取货' },
         { fy: a.sh.deckY + 0.06, wait: 0.18, st: '举升台板' }
@@ -455,6 +474,7 @@
             task.applied = WAP.rack.setCellOcc(cell.id, false);
             if (task.applied) { G.stats.outb++; task.counted = 'out'; }
             a.carry = makeLoad(kind, 7); G.root.add(a.carry);
+            if (WAP.physics) WAP.physics.stampLoad(a, cell);
           }, st: '举升取货' },
         { zTrack: true, wait: 0.15, st: '载货返回主通道' },
         { fy: a.sh.deckY }
@@ -647,7 +667,8 @@
   function updateLamps() {
     G.devices.forEach(function (a) {
       var want;
-      if (a.charging) want = (Math.floor(G.t * 3) % 2) ? 0xff2a2a : 0x3a0606;
+      if (a.alarmUntil && a.alarmUntil > G.t) want = (Math.floor(G.t * 6) % 2) ? 0xff2a2a : 0x7a1010;   // 物理模式：超载报警红闪
+      else if (a.charging) want = (Math.floor(G.t * 3) % 2) ? 0xff2a2a : 0x3a0606;
       else if (!G.playing || (a.wait > 0 && !a.q.length)) want = 0xf0b429;
       else want = 0x2ee66b;
       if (a.lamp.color.getHex() !== want) a.lamp.color.setHex(want);
@@ -682,7 +703,8 @@
         return {
           id: a.id, code: a.code, name: a.name,
           L: a.L + 1, level: '第 ' + (a.L + 1) + ' 层', st: a.st,
-          task: a.task ? a.task.label : '—', carry: !!a.carry, done: a.done
+          task: a.task ? a.task.label : '—', carry: !!a.carry, done: a.done,
+          kg: (WAP.physics && WAP.physics.enabled) ? WAP.physics.massOf(a) : null
         };
       }),
       lifts: G.lifts.map(function (l) {
@@ -788,6 +810,7 @@
     init: init, onRebuild: onRebuild, tick: tick,
     play: play, pause: pause, toggle: toggle, stop: stop, stepOnce: stepOnce,
     setSpeed: setSpeed, setMode: setMode, snapshot: snapshot, clearLogs: clearLogs, focus: focus,
+    log: log,
     get playing() { return G.playing; },
     get speed() { return G.speed; },
     get mode() { return G.mode; },

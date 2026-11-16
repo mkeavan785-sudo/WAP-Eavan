@@ -943,3 +943,170 @@ input[type=range]::-moz-range-thumb{width:11px;height:11px;border-radius:50%;bac
   .viewport{border-right:0;border-bottom:1px solid var(--line)}
   .top-actions .tbtn:not(.is-on){display:none}
 }
+
+/* ==========================================================================
+   设备模式（js/device.js）：电脑 / 平板 / 手机
+   电脑模式不加任何规则；平板＝画布全幅 + 右侧抽屉；手机＝底部面板 + 浮层重排。
+   所有触屏端规则都带 html[data-device] 前缀，优先级高于上方旧媒体查询。
+   ========================================================================== */
+
+/* ---------- 模式切换器（三端通用，电脑上也显示） ---------- */
+.device-seg{
+  display:flex;align-items:center;gap:2px;padding:2px;flex:0 0 auto;
+  border:1px solid var(--line);background:var(--panel-soft);border-radius:10px;
+}
+.device-seg button{
+  height:26px;padding:0 10px;border:0;background:transparent;border-radius:8px;
+  font-size:11px;font-weight:650;color:var(--ink-2);white-space:nowrap;transition:all .15s;
+}
+.device-seg button:hover{color:#4338ca;background:var(--brand-soft)}
+.device-seg button.is-on{background:var(--brand);color:#fff;box-shadow:0 2px 8px rgba(79,70,229,.2)}
+/* 抽屉关闭钮与悬浮面板按钮：电脑模式一律隐藏 */
+.sheet-close,.sheet-fab{display:none}
+
+/* ---------- 触屏两端公共 ---------- */
+html[data-device="tablet"],html[data-device="phone"]{-webkit-tap-highlight-color:transparent}
+html[data-device="tablet"] body,html[data-device="phone"] body{-webkit-user-select:none;user-select:none}
+html[data-device="tablet"] input,html[data-device="tablet"] textarea,
+html[data-device="phone"] input,html[data-device="phone"] textarea{
+  -webkit-user-select:text;user-select:text;font-size:max(13px,1em);
+}
+html[data-device="tablet"] .app,html[data-device="phone"] .app{height:100vh;height:100dvh}
+html[data-device="tablet"] .workspace,html[data-device="phone"] .workspace{display:block;position:relative}
+html[data-device="tablet"] .viewport,html[data-device="phone"] .viewport{
+  position:absolute;inset:0;border-right:0;border-bottom:0;
+}
+html[data-device="tablet"] .top-actions .tbtn,html[data-device="phone"] .top-actions .tbtn{display:inline-flex}
+html[data-device="tablet"] .panel-scroll,html[data-device="phone"] .panel-scroll{
+  -webkit-overflow-scrolling:touch;scrollbar-width:none;
+}
+html[data-device="tablet"] .panel-scroll::-webkit-scrollbar,
+html[data-device="phone"] .panel-scroll::-webkit-scrollbar{width:0;height:0}
+html[data-device="tablet"] .ctx-body,html[data-device="phone"] .ctx-body{max-height:none}
+/* 抽屉 / 底部面板头部：留出关闭钮位置并加拖柄条 */
+html[data-device="tablet"] .side-head,html[data-device="phone"] .side-head{position:relative;padding-right:52px}
+html[data-device="tablet"] .side-head::before,html[data-device="phone"] .side-head::before{
+  content:"";position:absolute;left:50%;top:5px;width:46px;height:4px;border-radius:99px;
+  background:#d4dbe8;transform:translateX(-50%);
+}
+html[data-device="tablet"] .sheet-close,html[data-device="phone"] .sheet-close{
+  display:grid;place-items:center;position:absolute;right:10px;top:9px;
+  width:36px;height:36px;border:1px solid var(--line);background:#fff;border-radius:10px;
+  font-size:14px;color:var(--ink-2);
+}
+/* 悬浮面板按钮（FAB） */
+html[data-device="tablet"] .sheet-fab,html[data-device="phone"] .sheet-fab{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  position:fixed;z-index:41;width:56px;height:56px;border-radius:50%;
+  border:1px solid rgba(255,255,255,.9);color:#fff;
+  background:linear-gradient(145deg,#6366f1,#4338ca);
+  box-shadow:0 10px 26px rgba(67,56,202,.4);transition:opacity .2s,transform .2s;
+}
+html[data-device="tablet"] .sheet-fab .fab-ico,html[data-device="phone"] .sheet-fab .fab-ico{font-size:19px;line-height:1}
+html[data-device="tablet"] .sheet-fab .fab-t,html[data-device="phone"] .sheet-fab .fab-t{font-size:9px;font-weight:650;letter-spacing:.05em}
+html.sheet-open[data-device="tablet"] .sheet-fab,html.sheet-open[data-device="phone"] .sheet-fab{
+  opacity:0;pointer-events:none;transform:translateY(10px);
+}
+/* 触控目标整体加大（≥44px） */
+html[data-device="tablet"] .orb,html[data-device="phone"] .orb{width:44px;height:44px}
+html[data-device="tablet"] .vm-btn,html[data-device="phone"] .vm-btn{width:50px;height:44px}
+html[data-device="tablet"] .tbtn,html[data-device="phone"] .tbtn{height:40px;font-size:12.5px}
+html[data-device="tablet"] .tbtn-icon,html[data-device="phone"] .tbtn-icon{width:40px}
+html[data-device="tablet"] .nav-control>summary,html[data-device="phone"] .nav-control>summary{height:40px;font-size:12.5px}
+html[data-device="tablet"] .nav-control>.side-nav button,html[data-device="phone"] .nav-control>.side-nav button{padding:11px 8px;font-size:12.5px}
+html[data-device="tablet"] .dp-btn,html[data-device="phone"] .dp-btn{padding:12px 8px;font-size:13px}
+html[data-device="tablet"] .dp-row-three .dp-btn,html[data-device="phone"] .dp-row-three .dp-btn{font-size:11.5px;padding:11px 3px}
+html[data-device="tablet"] .sim-btn,html[data-device="phone"] .sim-btn{height:42px;font-size:12.5px}
+html[data-device="tablet"] .sim-seg button,html[data-device="phone"] .sim-seg button{height:32px;font-size:11.5px}
+html[data-device="tablet"] .rt-btn,html[data-device="phone"] .rt-btn{padding:12px 8px;font-size:12px}
+html[data-device="tablet"] .step,html[data-device="phone"] .step{width:32px;height:32px}
+html[data-device="tablet"] .field input,html[data-device="tablet"] .field select,
+html[data-device="phone"] .field input,html[data-device="phone"] .field select{height:38px;font-size:13px}
+html[data-device="tablet"] input[type=range],html[data-device="phone"] input[type=range]{height:8px}
+html[data-device="tablet"] input[type=range]::-webkit-slider-thumb,
+html[data-device="phone"] input[type=range]::-webkit-slider-thumb{width:22px;height:22px;border-width:4px}
+html[data-device="tablet"] .dp-range,html[data-device="phone"] .dp-range{height:28px}
+html[data-device="tablet"] .sel-kind select,html[data-device="phone"] .sel-kind select{height:34px;font-size:12px}
+html[data-device="tablet"] .sel-pitch-row input,html[data-device="phone"] .sel-pitch-row input{height:30px}
+html[data-device="tablet"] .sel-pitch-auto,html[data-device="phone"] .sel-pitch-auto{height:32px;font-size:11.5px}
+html[data-device="tablet"] .sel-toggle,html[data-device="phone"] .sel-toggle{height:40px;font-size:13px}
+html[data-device="tablet"] .add-menu button,html[data-device="phone"] .add-menu button{height:42px;font-size:12.5px}
+html[data-device="tablet"] .eq-cat,html[data-device="phone"] .eq-cat{padding:14px 10px}
+html[data-device="tablet"] .side-nav button,html[data-device="phone"] .side-nav button{padding:11px 8px;font-size:12.5px}
+html[data-device="tablet"] .device-seg button,html[data-device="phone"] .device-seg button{height:32px;padding:0 12px}
+html[data-device="tablet"] summary,html[data-device="phone"] summary{padding:14px 15px}
+
+/* ---------- 平板模式：画布全幅 + 右侧抽屉 ---------- */
+html[data-device="tablet"] .sidebar{
+  position:fixed;z-index:45;top:66px;bottom:30px;right:0;width:min(332px,86vw);
+  transform:translateX(105%);transition:transform .26s cubic-bezier(.2,.8,.3,1);
+  box-shadow:-12px 0 40px rgba(24,40,80,.16);border-left:1px solid var(--line);overflow:hidden;
+}
+html.sheet-open[data-device="tablet"] .sidebar{transform:none}
+html[data-device="tablet"] .sheet-fab{right:16px;bottom:calc(44px + env(safe-area-inset-bottom))}
+
+/* ---------- 手机模式：底部面板 + 顶栏压缩 + 浮层重排 ---------- */
+html[data-device="phone"] .topbar{
+  height:calc(54px + env(safe-area-inset-top));flex-basis:calc(54px + env(safe-area-inset-top));
+  gap:10px;padding:0 10px;padding-top:env(safe-area-inset-top);
+}
+html[data-device="phone"] .brand{min-width:0}
+html[data-device="phone"] .brand-mark{width:32px;height:32px;flex-basis:32px;border-radius:10px}
+html[data-device="phone"] .brand-txt{display:none}
+html[data-device="phone"] .top-actions{overflow-x:auto;scrollbar-width:none}
+html[data-device="phone"] .top-actions::-webkit-scrollbar{display:none}
+html[data-device="phone"] #btnEquip,html[data-device="phone"] #btnRoutes{display:none}
+html[data-device="phone"] .nav-control>summary em{display:none}
+html[data-device="phone"] .nav-control>.side-nav{width:min(92vw,246px);top:44px}
+html[data-device="phone"] .statusbar{display:none}
+/* 底部面板 */
+html[data-device="phone"] .sidebar{
+  position:fixed;z-index:45;left:0;right:0;bottom:0;top:auto;
+  height:min(62vh,560px);max-height:78dvh;overflow:hidden;
+  border-radius:18px 18px 0 0;border:1px solid var(--line);border-bottom:0;
+  transform:translateY(104%);transition:transform .28s cubic-bezier(.2,.8,.3,1);
+  box-shadow:0 -14px 44px rgba(24,40,80,.22);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+html.sheet-open[data-device="phone"] .sidebar{transform:none}
+html[data-device="phone"] .panel-scroll{padding-bottom:calc(18px + env(safe-area-inset-bottom))}
+html[data-device="phone"] .sheet-fab{right:12px;bottom:calc(14px + env(safe-area-inset-bottom))}
+/* 视口浮层重排：拇指区留白、顶部提示 */
+html[data-device="phone"] .orbit-tools{left:12px;top:12px}
+html[data-device="phone"] .orbit-pair{padding:6px;gap:7px}
+html[data-device="phone"] .orbit-pair .orb{width:40px;height:40px}
+html[data-device="phone"] .orbit-cap{font-size:9px;padding:2px 7px}
+html[data-device="phone"] .orbit-hint{font-size:9px;padding:2px 7px}
+html[data-device="phone"] .view-mini{left:10px;bottom:calc(14px + env(safe-area-inset-bottom))}
+html[data-device="phone"] .vm-btn{width:46px;height:40px}
+html[data-device="phone"] .vm-btn span{font-size:8.5px}
+html[data-device="phone"] .sim-strip{
+  bottom:calc(14px + env(safe-area-inset-bottom));max-width:calc(100vw - 150px);
+  padding:5px 12px;font-size:10px;gap:8px;min-height:34px;
+}
+html[data-device="phone"] .ss-task{max-width:36vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+html[data-device="phone"] .ss-rate{display:none}
+html[data-device="phone"] .view-badge{top:12px;right:12px;max-width:46vw;overflow:hidden}
+html[data-device="phone"] .view-badge span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+html[data-device="phone"] .model-panel{
+  left:10px;right:10px;width:auto;top:auto;
+  bottom:calc(80px + env(safe-area-inset-bottom));
+}
+html[data-device="phone"] .viewport-tip{
+  bottom:auto;top:52px;left:50%;transform:translateX(-50%);
+  white-space:normal;text-align:center;border-radius:14px;line-height:1.55;
+  max-width:min(92vw,330px);font-size:10.5px;
+}
+html[data-device="phone"] .toast{top:calc(60px + env(safe-area-inset-top));max-width:88vw;text-align:center}
+/* 手机上模型变换台更大更好按 */
+html[data-device="phone"] .mp-axis button{width:32px;height:30px}
+html[data-device="phone"] .mp-yaw button{width:30px;height:30px}
+html[data-device="phone"] .mp-lift button{height:30px}
+html[data-device="phone"] .dpad button{height:32px;font-size:14px}
+html[data-device="phone"] .mp-reset{height:36px;font-size:12.5px}
+/* 手机横屏：视口高度有限，视图开关挪到右下（面板按钮左侧）、隐藏按钮组尾标签 */
+@media (orientation: landscape){
+  html[data-device="phone"] .orbit-cap{display:none}
+  html[data-device="phone"] .view-mini{left:auto;right:calc(82px + env(safe-area-inset-left))}
+  html[data-device="phone"] .sim-strip{max-width:calc(100vw - 240px)}
+}

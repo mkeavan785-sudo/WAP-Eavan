@@ -39,6 +39,10 @@
         ? (st.selection.crystalHidden ? '已选中具体个体 · 晶格暂时隐藏' : '晶格框块已显示 · 拖拽控制点可改尺寸')
         : (st.view.mode === 'move' ? '移动模式' : '旋转模式');
     }
+    /* 触屏自适应跟镜：库体尺寸变化时等比例拉远 / 拉近（仅手机 / 平板，PC 不动） */
+    if (WAP.device && WAP.device.mode && WAP.device.mode !== 'pc' && WAP.scene.growFit && st.geom) {
+      WAP.scene.growFit([st.geom.len, st.geom.top, st.geom.tot]);
+    }
   }
 
   var PART_NAME = {
@@ -158,6 +162,8 @@
   }
 
   function boot() {
+    if (WAP.device && WAP.device.init) WAP.device.init();   // 设备模式先行：布局 CSS 就位后再建场景（画布尺寸随模式变化）
+    if (WAP.physics && WAP.physics.init) WAP.physics.init(); // 物理规则仿真：绑定开关 / 参数档，包装守恒巡航任务
     var canvas = $('c'), viewport = $('viewport');
     WAP.state.cfg = WAP.core.load();
     WAP.state.cargoOverrides = WAP.core.loadCargoOverrides();

@@ -76,6 +76,8 @@
     netH: 'full',            // 网高：full / 3m
     vE: 256,                 // 空载速度 cm/s
     vL: 160,                 // 负载速度 cm/s
+    physicsMode: false,      // 物理规则仿真：质量插值加减速 / 换向 2s / 顶升 2s / 防撞避让 / 超载拒载
+    simPreset: 'demo',       // 参数档：demo 演示快节奏 / real 真实 FWS-H150 厂家参数
     lowR: [1, 3],            // 下层（固定层）范围
     lowN: 3,                 // 下层穿梭车台数
     highR: [4, 6],           // 上层（跨层）范围，null＝不设

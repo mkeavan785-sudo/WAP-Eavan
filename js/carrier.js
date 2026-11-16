@@ -113,7 +113,9 @@
     a.q = [];
     a.task = { label: '路线作业 · 四向车接驳', kind: 'flow', type: 'flow', flow: true };
     a.wait = 1e9; a.S = {};
-    r.car = { a: a, saved: saved, deckY: levelY(level), legs: null, li: 0 };
+    r.car = { a: a, r: r, saved: saved, deckY: levelY(level), legs: null, li: 0 };
+    /* 物理规则仿真上下文：防撞裁决 / 载重质量（physics 关闭时仅为冗余字段） */
+    a._borrowed = true; a._carRef = r.car; a._loadKg = null;
     /* ① 子通道 Z 回主通道 → ② 主通道 X 到目标列 → ③ 子通道 Z 到接驳点。
        一次只动一根轴，绝不斜穿货架、也不在子通道里横向平移。 */
     var ax = a.p.x, az = a.p.z, tz = nearestTrackZ(az);
@@ -139,14 +141,54 @@
     var a = c.a, s = c.saved;
     a.q = s.q.slice(); a.task = s.task; a.wait = s.wait;
     a.guard = s.guard; a.st = s.st; a.S = s.S || {};
+    a._borrowed = false; a._carRef = null; a._loadKg = null; a._carX = null;
     a.p.y = levelY(a.L);          // 车留在当前层继续被仿真调度，不消失、不复位
     r.car = null;
   }
   function moveCarAlong(r, dt) {
     var c = r.car, leg = c.legs[c.li];
     if (!leg) return true;
-    var a = c.a, dx = leg.x - a.p.x, dz = leg.z - a.p.z;
-    /* 空车去接驳点可以更快；两根轴严格分开，一次只动一根 */
+    var a = c.a;
+    /* 让行等待腿：原地停留指定时长（防撞避让的让位序列） */
+    if (leg.hold) {
+      if (c._hold == null) c._hold = leg.hold;
+      c._hold -= dt;
+      a.st = '让行等待 · 避让对向车';
+      if (c._hold > 0) return false;
+      c._hold = null; c.li++;
+      return c.li >= c.legs.length;
+    }
+    var dx = leg.x - a.p.x, dz = leg.z - a.p.z;
+    /* 物理规则仿真（默认关）：换向驻留 2s + 主通道避让 + 载重 S 曲线加减速 */
+    if (WAP.physics && WAP.physics.enabled) {
+      if (WAP.physics.legHold(c, leg, dt)) { a.st = '换向中（轮盘 90°）'; a._carX = null; return false; }
+      a._carX = Math.abs(dx) >= Math.abs(dz) ? leg.x : null;
+      if (Math.abs(dx) > 0.05 && WAP.physics.laneBlocked(a, leg.x)) {
+        a.st = '避让等待 · 主通道占用';
+        return false;
+      }
+      if (c._phLeg !== leg) {
+        c._phLeg = leg; c._ph = {};
+        c._legLen = Math.abs(leg.x - a.p.x) + Math.abs(leg.z - a.p.z);
+      }
+      var pl = WAP.physics.plan(a, c._legLen, a._loadKg);
+      if (Math.abs(dx) > 0.002) {
+        var sx = WAP.physics.advance(c._ph, Math.abs(dx), pl.V, pl.Ta, dt);
+        a.p.x += Math.sign(dx) * Math.min(sx, Math.abs(dx));
+      } else if (Math.abs(dz) > 0.002) {
+        var sz = WAP.physics.advance(c._ph, Math.abs(dz), pl.V, pl.Ta, dt);
+        a.p.z += Math.sign(dz) * Math.min(sz, Math.abs(dz));
+      }
+      if (Math.abs(leg.x - a.p.x) < 0.002 && Math.abs(leg.z - a.p.z) < 0.002) {
+        a.p.x = leg.x; a.p.z = leg.z;
+        WAP.physics.legDone(c, leg);
+        c.li++;
+      }
+      a.p.y = c.deckY;
+      a.st = '路线接驳 · ' + (leg.tag || '前往取货点');
+      return c.li >= c.legs.length;
+    }
+    /* 空车去接驳点可以更快；两根轴严格分开，一次只动一根（原实现） */
     var step = SPEED * 1.8 * dt;
     if (Math.abs(dx) > 0.002) {
       if (Math.abs(dx) > step) a.p.x += Math.sign(dx) * step;

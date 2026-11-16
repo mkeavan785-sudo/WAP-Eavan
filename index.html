@@ -48,6 +48,13 @@
           <button type="button" data-panel="all" class="nav-all">全部展开</button>
         </div>
       </details>
+      <span class="tsep"></span>
+      <!-- 设备模式：电脑 / 平板 / 手机（首次自动检测，手动切换后记忆） -->
+      <div class="device-seg" id="deviceSeg" role="group" aria-label="设备模式：电脑 / 平板 / 手机">
+        <button type="button" data-dev="pc" class="is-on" aria-pressed="true" title="电脑模式（当前布局不变）">电脑</button>
+        <button type="button" data-dev="tablet" aria-pressed="false" title="平板模式：画布全幅 + 右侧抽屉面板">平板</button>
+        <button type="button" data-dev="phone" aria-pressed="false" title="手机模式：底部面板 + 触控手势">手机</button>
+      </div>
       <button type="button" class="tbtn tbtn-icon" id="btnFull" title="全屏" aria-label="全屏">⛶</button>
     </div>
   </header>
@@ -346,12 +353,19 @@
         <button type="button" class="vm-btn" id="btnFit" title="适应视图">⛶<span>适应</span></button>
       </div>
 
+      <!-- 平板 / 手机模式：打开抽屉 / 底部面板的悬浮按钮（电脑模式隐藏） -->
+      <button type="button" class="sheet-fab" id="sheetFab" aria-label="打开控制面板">
+        <span class="fab-ico">☰</span><span class="fab-t">面板</span>
+      </button>
+
       <div class="loading" id="loading"><div class="spinner"></div><span>正在构建四向库模型…</span></div>
     </section>
 
     <aside class="sidebar" id="sidebar">
       <div class="side-head side-head-slim">
         <div class="side-title">控制面板 <small>具体选项在顶栏「⚙ 控制」中展开</small></div>
+        <!-- 平板 / 手机模式：收起抽屉或底部面板（电脑模式隐藏） -->
+        <button type="button" class="sheet-close" id="sbSheetClose" aria-label="收起面板">✕</button>
       </div>
       <div class="panel-scroll" id="panelScroll">
 
@@ -368,6 +382,15 @@
           <div class="sim-loop">
             <button type="button" class="sim-btn sim-loop-btn" id="simLoop" aria-pressed="false">⇄ 返程循环：关</button>
             <span class="sim-loop-tip" id="simLoopTip">默认货物到终点后静止；开启后原路返回</span>
+          </div>
+          <div class="sim-loop">
+            <button type="button" class="sim-btn sim-loop-btn" id="btnPhys" aria-pressed="false">⚗ 物理规则仿真：关</button>
+            <span class="sim-loop-tip" id="physTip">关闭中（与原行为一致）；开启后按当前参数档计算质量、换向、避让与拒载</span>
+          </div>
+          <div class="sim-seg" id="simPreset" role="group" aria-label="运动参数档">
+            <span>参数档</span>
+            <button type="button" data-preset="demo" class="is-on">演示</button>
+            <button type="button" data-preset="real">真实 FWS-H150</button>
           </div>
           <div class="sim-tpl">
             <button type="button" class="sim-btn sim-tpl-btn" id="simTemplate">＋ 一键添加 / 识别输送线</button>
@@ -645,6 +668,7 @@
 
 <script src="vendor/three.min.js"></script>
 <script src="js/core.js"></script>
+<script src="js/physics.js"></script>
 <script src="js/materials.js"></script>
 <script src="js/scene.js"></script>
 <script src="js/rack.js"></script>
@@ -658,6 +682,7 @@
 <script src="js/carrier.js"></script>
 <script src="js/pallets.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/device.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
