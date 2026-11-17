@@ -602,6 +602,24 @@
     $('selClassWrap').style.display = (cell.chg || conv) ? 'none' : '';
     $('selKind').value = WAP.state.cargoOverrides[cell.id] || 'auto';
     $('selClass').value = WAP.state.cargoClassOverrides[cell.id] || 'auto';
+    /* 质量明细：货物 + 子托 + 母托，按当前大类实时算（sss.docx 钢体质量） */
+    var sm = $('selMass');
+    if (sm) {
+      if (cell.chg || conv || !cell.occ) {
+        sm.textContent = '质量：—（该位无货）';
+      } else {
+        var cls = (WAP.state.cargoClassOverrides && WAP.state.cargoClassOverrides[cell.id]) ||
+          WAP.state.cfg.cargoClass;
+        var def = WAP.core.CARGO_CLASS_DEF[cls] || WAP.core.CARGO_CLASS_DEF.goods;
+        var pk = (WAP.physics && WAP.physics.palletKg) || { sub: 18, mother: 28 };
+        var parts = [];
+        if (def.goods) parts.push('货物 ' + (WAP.state.cfg.kg || 800) + 'kg');
+        if (def.sub) parts.push('子托 ' + pk.sub + 'kg');
+        if (def.mother) parts.push('母托 ' + pk.mother + 'kg');
+        var total = (WAP.physics && WAP.physics.cargoKg) ? WAP.physics.cargoKg(cell) : 0;
+        sm.textContent = '质量：' + Math.round(total) + ' kg（' + (parts.join('+') || '空') + '）';
+      }
+    }
     syncCellPitch();
     $('sbSel').textContent = conv ? (lift ? lift.name + ' · 层间输送线接驳位' : '层间输送线接驳位')
       : ('货位 L' + (cell.l + 1) + ' · B' + (cell.i + 1) + ' · Z' + (cell.b + 1) + ' · ' + (cell.occ ? '占用' : '空闲'));

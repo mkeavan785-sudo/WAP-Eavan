@@ -33,6 +33,10 @@
   var TYPES = {
     roller:    { n: '辊道机',     code: 'RG', d: '滚筒输送 · 无载具', flow: 'X' },
     chain:     { n: '链条输送机', code: 'CH', d: '双侧链条 · 托盘移载', flow: 'X' },
+    triple:    { n: '三链机',     code: 'TC', d: '三条链条 · 1500kg / 12m·min⁻¹（sss 6.8）', flow: 'X' },
+    liftConv:  { n: '带升降输送机', code: 'LC', d: '链输送面 + 顶升机构 · 接驳提升机', flow: 'XY' },
+    weigh:     { n: '称重模块',   code: 'WM', d: '0–1500kg ±0.3kg · 超限送异常口（sss 6.14）', flow: 'X' },
+    bcr:       { n: 'BCR读码器',  code: 'BR', d: '基恩士 SR-80W · 侧边读码（sss 6.13）', flow: '-' },
     destacker: { n: '拆叠盘机',   code: 'DS', d: '外围四边框 · 空托盘堆叠/拆分 · 非转向工位', flow: 'Y' },
     transfer:  { n: '移载机',     code: 'TR', d: '顶升移载 90° 换向 · 用在转弯位', flow: 'XZ' },
     lift:      { n: '提升机',     code: 'LF', d: '垂直提升 · 与库内共用', flow: 'Y' },
@@ -52,16 +56,21 @@
     /* 外形检测门：套在链条机 / 辊道机外围，货物过中心亮 5 秒光幕 */
     gate:      { n: '外形检测门', code: 'GD', d: '单片门 · 光幕与门平行 · 过中心亮 5 秒', flow: '-' }
   };
-  var ORDER = ['roller', 'chain', 'destacker', 'transfer', 'lift', 'platform', 'wall',
+  var ORDER = ['roller', 'chain', 'triple', 'liftConv', 'weigh', 'bcr',
+    'destacker', 'transfer', 'lift', 'platform', 'wall',
     'emitter', 'receiver', 'single', 'person', 'forklift', 'agv', 'truck', 'gate'];
   /* 点位型设备（不占网格名额，可叠放在已有设备上） */
   var VIRTUAL = { emitter: 1, receiver: 1, single: 1, lift: 1 };
   /* 外覆型设备：套在已有输送设备外围，同样不占网格名额 */
-  var OVERLAY = { gate: 1 };
+  var OVERLAY = { gate: 1, bcr: 1 };   // 检测装置套在输送线上，不占格
 
   var ICON = {
     roller: '<rect x="3" y="9" width="34" height="10" rx="2"/><path d="M7 12h26M7 16h26M11 19v6M29 19v6"/>',
     chain: '<rect x="3" y="8" width="34" height="12" rx="2"/><path d="M6 11h28M6 17h28M11 20v5M29 20v5"/><path d="M8 8v12M32 8v12"/>',
+    triple: '<rect x="3" y="8" width="34" height="12" rx="2"/><path d="M6 10h28M6 14h28M6 18h28M11 20v5M29 20v5"/>',
+    liftConv: '<rect x="3" y="15" width="34" height="8" rx="2"/><path d="M9 15V9M31 15V9M9 9h22"/><path d="M20 9V4M15 4h10"/><path d="M7 23v3M33 23v3"/>',
+    weigh: '<rect x="4" y="16" width="32" height="7" rx="2"/><path d="M8 16v-6h24v6"/><rect x="14" y="4" width="12" height="6" rx="1"/><path d="M17 7h6"/>',
+    bcr: '<path d="M10 26V8h8v18M10 8h8"/><path d="M18 12l14 4-14 4"/><circle cx="14" cy="17" r="2"/><path d="M6 26h16"/>',
     destacker: '<path d="M5 24V5h30v19"/><path d="M5 5h30M35 5v19"/><path d="M12 15h16v7H12z"/><path d="M4 14h9M27 14h9"/>',
     transfer: '<path d="M3 11h34M3 19h34"/><path d="M13 4v22M27 4v22"/><path d="M9 11h22M9 19h22"/><path d="M20 5v20"/>',
     lift: '<path d="M7 26V4M33 26V4M7 4h26M7 26h26"/><path d="M11 18h18v5H11z"/><path d="M20 4v22"/>',
@@ -253,6 +262,59 @@
     chainParts(g, u, anim);
     return { group: g, dims: [u.W, u.H + 0.16, u.D], anim: { step: function (dt, run) {
       if (run && anim.chain) anim.chain(dt);
+    } } };
+  }
+
+  /* 三链机（sss.docx 6.8）：三条并行链条输送，额定 1500kg / 12m·min⁻¹，
+     减速电机驱动，碳钢喷塑机架。结构与双链机同源，中间多一条链，三链同步。 */
+  function buildTriple(d) {
+    var S = shared(), u = unit(), g = new T.Group();
+    frameLegs(g, u);
+    box(g, 0.30, 0.26, 0.32, S.steelDark, u.W / 2 - 0.04, u.H - 0.30, -u.D / 2 - 0.06); // 减速电机
+    var lanes = [-u.D * 0.30, 0, u.D * 0.30];
+    lanes.forEach(function (z) {
+      box(g, u.W, 0.09, 0.11, S.steelLight, 0, u.H - 0.03, z);
+      box(g, u.W, 0.032, 0.085, S.black, 0, u.H + 0.04, z);
+    });
+    var linkCount = 16, span = u.W - 0.2, offset = 0;
+    var links = new T.InstancedMesh(new T.BoxGeometry(0.055, 0.022, 0.07), S.black, linkCount * lanes.length);
+    links.frustumCulled = false; links.castShadow = true;
+    var dummy = new T.Object3D();
+    function placeLinks() {
+      for (var k = 0; k < linkCount * lanes.length; k++) {
+        var lane = Math.floor(k / linkCount), i = k % linkCount;
+        var x = -u.W / 2 + 0.10 + ((i * span / linkCount + offset) % span);
+        dummy.position.set(x, u.H + 0.066, lanes[lane]);
+        dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix(); links.setMatrixAt(k, dummy.matrix);
+      }
+      links.instanceMatrix.needsUpdate = true;
+    }
+    placeLinks(); g.add(links);
+    g.userData.eqMeta = { actor: 'triple', flow: 'X' };
+    return { group: g, dims: [u.W, u.H + 0.16, u.D], anim: { step: function (dt, run) {
+      if (run) { offset = (offset + dt * 0.42) % span; placeLinks(); }
+    } } };
+  }
+
+  /* 带升降输送机（sss.docx 设备清单 5 台）：链输送面 + 顶部顶升叉机构，
+     把托盘托起交接给提升机 / 上层。顶升台沿 Y 往复，输送面链条持续运转。 */
+  function buildLiftConv(d) {
+    var S = shared(), u = unit(), g = new T.Group(), anim = {};
+    chainParts(g, u, anim);
+    var deck = new T.Group();
+    deck.position.set(0, u.H + 0.02, 0);
+    deck.userData.eqPart = 'liftDeck';
+    [-1, 1].forEach(function (sx) {
+      box(deck, 0.09, 0.30, 0.09, S.steelDark, sx * u.W * 0.30, 0.15, 0);
+      box(deck, 0.10, 0.05, u.D * 0.80, S.bar, sx * u.W * 0.30, 0.32, 0);
+    });
+    g.add(deck);
+    g.userData.eqMeta = { actor: 'liftConv', flow: 'XY' };
+    return { group: g, dims: [u.W, u.H + 0.42, u.D], anim: { step: function (dt, run, t) {
+      if (run && anim.chain) anim.chain(dt);
+      var rise = run ? 0.20 * (0.5 + 0.5 * Math.sin(t * 1.05)) : 0;
+      deck.position.y = u.H + 0.02 + rise;
     } } };
   }
 
@@ -656,6 +718,72 @@
     } } };
   }
 
+  /* 称重模块（sss.docx 6.14）：额定 0–1500kg、精度 ±0.3kg，装在入库站台；
+     超限货物送异常处理站台。这里用链输送面 + 称重台 + 数显屏演示，
+     数显随仿真滚动，超载时屏幕转红（只读 cfg.kg，不改账本）。 */
+  function buildWeigh(d) {
+    var S = shared(), u = unit(), g = new T.Group(), anim = {};
+    chainParts(g, u, anim);
+    var plate = box(g, u.W * 0.88, 0.035, u.D * 0.78, S.steelLight, 0, u.H + 0.10, 0);
+    plate.userData.eqPart = 'weighPlate';
+    box(g, 0.06, 0.58, 0.06, S.steelDark, u.W / 2 + 0.08, u.H + 0.29, -u.D / 2); // 屏立柱
+    var cv = document.createElement('canvas'); cv.width = 168; cv.height = 64;
+    var tex = new T.CanvasTexture(cv);
+    var screen = new T.Mesh(new T.PlaneGeometry(0.50, 0.19),
+      new T.MeshBasicMaterial({ map: tex, toneMapped: false }));
+    screen.position.set(u.W / 2 + 0.08, u.H + 0.58, -u.D / 2 + 0.02);
+    screen.rotation.y = Math.PI / 5;
+    g.add(screen);
+    g.userData.eqMeta = { actor: 'weigh', flow: 'X' };
+    var last = '';
+    return { group: g, dims: [u.W + 0.20, u.H + 0.70, u.D], anim: { step: function (dt, run, t) {
+      if (run && anim.chain) anim.chain(dt);
+      var rated = WAP.state.cfg.kg || 800;
+      var kg = run ? Math.round(rated * (0.86 + 0.16 * Math.sin(t * 0.7))) : rated;
+      var over = kg > rated;
+      var k = kg + '|' + over;
+      if (k !== last) {
+        last = k;
+        var x = cv.getContext('2d');
+        x.fillStyle = over ? '#3a0d0d' : '#08202a'; x.fillRect(0, 0, cv.width, cv.height);
+        x.font = 'bold 30px Consolas,monospace';
+        x.fillStyle = over ? '#ff5a4d' : '#48e0a0';
+        x.textAlign = 'center'; x.fillText(kg + ' kg', cv.width / 2, 41);
+        x.font = '14px Consolas,monospace'; x.fillStyle = over ? '#ff9a8f' : '#6fbf9f';
+        x.fillText(over ? 'OVER LOAD' : 'WEIGH OK', cv.width / 2, 59);
+        tex.needsUpdate = true;
+      }
+      plate.position.y = u.H + 0.10 - (run ? 0.008 : 0); // 载货时台面微沉
+    } } };
+  }
+
+  /* BCR 读码器（sss.docx 6.13）：基恩士 SR-80W，侧边读取，共 4 个。
+     侧立柱上的扫描头 + 扇形扫描光，货物经过时绿闪表示读码成功；
+     纯视觉，不写任何状态机字段。 */
+  function buildBCR(d) {
+    var S = shared(), u = unit(), g = new T.Group();
+    frameLegs(g, u);
+    box(g, 0.08, 1.02, 0.08, S.steel, -u.W / 2 + 0.10, 0.51, -u.D / 2 + 0.10); // 侧立柱
+    var head = box(g, 0.22, 0.17, 0.16, S.steelDark, -u.W / 2 + 0.22, 1.0, -u.D / 2 + 0.10);
+    head.userData.eqPart = 'bcrHead';
+    var fanMat = new T.MeshBasicMaterial({ color: 0x37e0ff, transparent: true, opacity: 0,
+      side: T.DoubleSide, depthWrite: false, toneMapped: false });
+    var fan = new T.Mesh(new T.ConeGeometry(0.42, 0.95, 16, 1, true), fanMat);
+    fan.rotation.z = -Math.PI / 2;
+    fan.position.set(-u.W / 2 + 0.68, 0.80, -u.D / 2 + 0.10);
+    fan.userData.eqPart = 'bcrFan'; g.add(fan);
+    var led = new T.Mesh(new T.SphereGeometry(0.035, 8, 6),
+      new T.MeshBasicMaterial({ color: 0x2ee66b, toneMapped: false }));
+    led.position.set(-u.W / 2 + 0.22, 1.13, -u.D / 2 + 0.10);
+    g.add(led);
+    g.userData.eqMeta = { actor: 'bcr', flow: '-' };
+    return { group: g, dims: [u.W, 1.16, u.D], anim: { step: function (dt, run, t) {
+      var scan = run && Math.sin(t * 2.2) > -0.35;
+      fanMat.opacity = scan ? 0.16 + 0.14 * Math.abs(Math.sin(t * 9)) : 0;
+      led.material.color.setHex(scan ? 0x2ee66b : 0x445566);
+    } } };
+  }
+
   /* ---------------- 单货架：主体货架同款结构 / 贴图，按货位格生成 ----------------
      用户点「单货架」后不产生任何常驻模型，直接进入货位网格选最多 4 格；
      选格 / 改参数时实时重建预览（与主体货架同样用 upright / beam / rail / foot
@@ -769,6 +897,10 @@
     switch (d.type) {
       case 'roller': out = buildRoller(d); break;
       case 'chain': out = buildChain(d); break;
+      case 'triple': out = buildTriple(d); break;
+      case 'liftConv': out = buildLiftConv(d); break;
+      case 'weigh': out = buildWeigh(d); break;
+      case 'bcr': out = buildBCR(d); break;
       case 'transfer': out = buildTransfer(d); break;
       case 'destacker': out = buildDestacker(d); break;
       case 'lift': out = buildLiftDev(d); break;
@@ -1463,7 +1595,7 @@
   /* 输送设备建模时货流沿本地 +X；货架子通道是 Z 向。
      放在库体前后两侧（对接格 / 库外）的输送线必须转向 90°（X→Z）才与子通道一致；
      放在左右两侧则保持 0°。用户手动旋转过（yawManual）的不再自动摆正。 */
-  var FLOW_TYPES = { roller: 1, chain: 1, transfer: 1, destacker: 1 };
+  var FLOW_TYPES = { roller: 1, chain: 1, triple: 1, liftConv: 1, weigh: 1, transfer: 1, destacker: 1 };
   function flowAxisOf(cell) {
     var g = geom();
     if (!g || !cell) return 'z';
@@ -1619,7 +1751,7 @@
     var isSingle = type === 'single';
     /* 外形检测门优先套到已有辊道机 / 链条机所在格，其次才找空格 */
     var key = isSingle ? ('S|draft|' + E.seq)
-      : (opt.key || (type === 'gate' ? findGateCellKey() : null) ||
+      : (opt.key || ((type === 'gate' || type === 'bcr') ? findGateCellKey() : null) ||
          (type === 'destacker' ? findDestackerCellKey() : null) ||
          findFreeCellKey(type, { x: 0, z: g.z0 - CELL * 1.5, exclude: exclude }));
     var cell = isSingle ? cellOf({ type: 'single', cellKey: key, singleCells: [] }) : E.cellMap[key];

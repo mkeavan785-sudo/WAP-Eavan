@@ -213,6 +213,7 @@
           <label for="selClass">本货位托盘大类</label>
           <select id="selClass" aria-label="本货位货物大类"></select>
         </div>
+        <div class="sel-mass" id="selMass">质量：—</div>
         <button type="button" class="sel-toggle" id="selToggle">切换占用状态</button>
       </div>
 
@@ -362,6 +363,7 @@
       <div class="phys-hud" id="physHud" aria-label="物理仿真实时状态" hidden>
         <div class="ph-hd"><span>⚗ 物理仿真</span><b id="phPreset">真实 FWS-H150</b></div>
         <div class="ph-rows" id="phRows"></div>
+        <div class="ph-mass" id="phMass">—</div>
         <div class="ph-foot" id="phFoot">—</div>
       </div>
 
@@ -413,7 +415,7 @@
           <div class="sim-tpl">
             <button type="button" class="sim-btn sim-tpl-btn" id="simTemplate">＋ 一键添加 / 识别输送线</button>
             <span class="sim-tpl-state" id="simTemplateState">尚未识别输送线路模板</span>
-            <p class="sim-tpl-tip">已搭好线路时直接<b>识别为模板</b>（不改动其它设备）；空场景则搭建<b>全结构示范线</b>：提升机正面口 → 辊道 → <b>链条机</b> → 辊道(套<b>外形检测门</b>) → 转弯位<b>移载机</b> → 转向后辊道 → <b>拆叠盘机</b>，并摆放 <b>AGV / 人 / 叉车 / 卡车</b> 作气氛（拆叠盘机只做空托盘工位、不参与转向）。生成<b>入库 / 出库</b>两条路线，仿真严格<b>依据路线</b>并由真实四向车 / 提升机 / 输送设备承载货物；后续改动布局以后续布局为准。</p>
+            <p class="sim-tpl-tip">已搭好线路时直接<b>识别为模板</b>（不改动其它设备）；空场景则按 <b>sss.docx 设备清单</b>搭建全结构示范线：提升机口 → 辊道 → <b>双链机</b> → <b>三链机</b>（套<b>外形检测门 + BCR 读码器</b>）→ <b>带升降输送机</b> → 转弯<b>移载机</b> → <b>称重模块</b> → 拆叠盘机，并摆放 AGV / 人 / 叉车 / 卡车作气氛。生成<b>入库 / 出库</b>两条路线，仿真严格<b>依据路线</b>并由真实四向车 / 提升机 / 输送设备承载货物；后续改动布局以后续布局为准。</p>
           </div>
           <div class="sim-seg" id="simSpeed" role="group" aria-label="仿真倍速">
             <span>倍速</span>

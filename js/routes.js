@@ -42,6 +42,10 @@
   var DEVICE_PROFILES = {
     roller:    { n: '辊道机',     action: '滚筒自转 + 货物沿长轴匀速直行',       move: 'linear' },
     chain:     { n: '链条输送机', action: '链节循环平移 + 货物直行',             move: 'linear' },
+    triple:    { n: '三链机',     action: '三条链同步循环 + 货物直行（1500kg）', move: 'linear' },
+    liftConv:  { n: '带升降输送机', action: '链输送 + 顶升台托举交接提升机',      move: 'lift' },
+    weigh:     { n: '称重模块',   action: '称重台微沉 + 数显滚动 · 超限报警',    move: 'linear' },
+    bcr:       { n: 'BCR读码器',  action: '侧读扫描光扇 · 读码成功绿闪',         move: 'none' },
     transfer:  { n: '移载机',     action: '顶升脱离原线 → 横向移载 → 落下复位', move: 'transfer' },
     destacker: { n: '拆叠盘机',   action: '升降台托举 + 拨叉伸缩 + 单片输出',    move: 'lift' },
     lift:      { n: '提升机',     action: '载货台垂直升降 → 平层停 → 水平推出',  move: 'vertical' },
@@ -53,7 +57,7 @@
     conveyor: { n: '层间输送线', action: '提升机口接驳，静置等四向车',              move: 'wait' },
     lift:     { n: '提升机',     action: '跨层垂直转运 + 平层对位',                 move: 'vertical' }
   };
-  var CONVEY_TYPES = ['roller', 'chain', 'transfer', 'destacker'];
+  var CONVEY_TYPES = ['roller', 'chain', 'triple', 'liftConv', 'weigh', 'transfer', 'destacker'];
 
   var R = {
     ready: false, canvas: null, rc: null, v2: null,
@@ -1912,24 +1916,32 @@
        线尾外再摆放 AGV / 人 / 叉车 / 卡车（不进 chain，只作场景气氛）。 */
     put('roller', dock ? dock.key : null, 90, x0, z0, 0, 0);
     put('chain', keyAt(1), 90, x0, z0 + dir * CELL * 1, 0, dir * 1);   // 链条输送机
-    var roller2 = put('roller', keyAt(2), 90, x0, z0 + dir * CELL * 2, 0, dir * 2);
-    /* 外形检测门：OVERLAY，套在直线段辊道格上，不占格、不进 chain */
-    if (roller2) {
-      var gate = eq.add('gate', { key: roller2.cellKey, quiet: true, template: true });
-      if (gate) made.push(gate);
+    /* 三链机（sss 6.8）：三条链并行，接在双链机后，同为直线段 */
+    put('triple', keyAt(2), 90, x0, z0 + dir * CELL * 2, 0, dir * 2);
+    /* 检测类 OVERLAY：外形检测门 + BCR 读码器（sss 6.13），
+       都套在直线段输送设备格上，不占格、不进 carrier 链 */
+    var lineCell = keyAt(2);
+    if (lineCell) {
+      var g1 = eq.add('gate', { key: lineCell, quiet: true, template: true });
+      var g2 = eq.add('bcr', { key: lineCell, quiet: true, template: true });
+      if (g1) made.push(g1);
+      if (g2) made.push(g2);
     }
+    /* 带升降输送机：直线段末端，演示顶升台把货托起交接 */
+    put('liftConv', keyAt(3), 90, x0, z0 + dir * CELL * 3, 0, dir * 3);
     /* 转弯位 = 移载机（顶升移载做 90° 换向）；拆叠盘机只做空托盘工位，不参与转向 */
-    var turnZ = z0 + dir * CELL * 3;
-    put('transfer', keyAt(3), 0, x0, turnZ, 0, dir * 3);
-    put('roller', hasCol ? colKey(ci - 1, cj + dir * 3) : null,
-      0, x0 - CELL, turnZ, -1, dir * 3);
-    /* 线尾拆叠盘机：接在转向后辊道外侧一格（空托盘堆垛/拆分工位） */
-    put('destacker', hasCol ? colKey(ci - 2, cj + dir * 3) : null,
-      0, x0 - CELL * 2, turnZ, -2, dir * 3);
+    var turnZ = z0 + dir * CELL * 4;
+    put('transfer', keyAt(4), 0, x0, turnZ, 0, dir * 4);
+    /* 称重模块（sss 6.14）：转向后第一段，数显 + 超限报警 */
+    put('weigh', hasCol ? colKey(ci - 1, cj + dir * 4) : null,
+      0, x0 - CELL, turnZ, -1, dir * 4);
+    /* 线尾拆叠盘机：接在称重外侧一格（空托盘堆垛/拆分工位） */
+    put('destacker', hasCol ? colKey(ci - 2, cj + dir * 4) : null,
+      0, x0 - CELL * 2, turnZ, -2, dir * 4);
     /* 场景角色：AGV(AMR) / 人 / 叉车 / 卡车，放在线尾外侧空格，纯气氛、不进 carrier 链 */
     var roles = [['agv', -3, 0], ['person', -1, 1], ['forklift', -2, 1], ['truck', -2, -1]];
     roles.forEach(function (r) {
-      var key = hasCol ? colKey(ci + r[1], cj + dir * 3 + r[2]) : null;
+      var key = hasCol ? colKey(ci + r[1], cj + dir * 4 + r[2]) : null;
       eq.add(r[0], { key: key, quiet: true, template: true });
     });
     return made;

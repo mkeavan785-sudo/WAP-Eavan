@@ -371,10 +371,13 @@
     var x0 = first.fromX, z0 = first.fromZ;
     var y0 = Math.max(LAND_Y, first.fromY);
 
+    var cls = opt.cls || 'goods';
     var unit = opt.unit || rack().makeCargoUnit(opt.kind || 'carton',
-      (C.seq * 17) % 997, opt.cls || 'goods');
+      (C.seq * 17) % 997, cls);
     if (!unit.parent) C.root.add(unit);
     unit.position.set(x0, y0, z0);
+    /* 刚体质量：货物 + 托盘组合质量 stamp 到单元自身（货物大类决定） */
+    if (WAP.physics && WAP.physics.classKg) unit.userData.massKg = WAP.physics.classKg(cls);
 
     var r = {
       id: 'cr' + (C.seq++), tag: opt.tag || 'route',

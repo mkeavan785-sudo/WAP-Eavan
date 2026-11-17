@@ -65,14 +65,24 @@
     return WAP.core.CARGO_CLASS_ALIAS[g] || g;
   }
   /* 质量按「货物/子托/母托」三层组合计算，与 7 大类定义同源 */
-  function cargoKg(cell) {
-    var cls = cellClass(cell);
+  function classKg(cls) {
     var def = WAP.core.CARGO_CLASS_DEF[cls] || WAP.core.CARGO_CLASS_DEF.goods;
     var kg = 0;
-    if (def.goods) kg += cfg().kg || 800;
+    if (def.goods) kg += (cfg().kg || 800);
     if (def.sub) kg += PALLET_KG.sub;
     if (def.mother) kg += PALLET_KG.mother;
     return kg;
+  }
+  function cargoKg(cell) { return classKg(cellClass(cell)); }
+  /* 货物 / 托盘单元的自身质量（读 stamp，未 stamp 时按大类现算）。
+     这是运行态「货物有质量、托盘有质量」的唯一读取入口。 */
+  function unitMass(unit) {
+    if (!unit) return 0;
+    var ud = unit.userData || {};
+    if (ud.massKg != null) return ud.massKg;
+    if (ud.palletClass) return classKg(ud.palletClass);
+    if (ud.cargoClass) return classKg(ud.cargoClass);
+    return 0;
   }
   function cellById(id) {
     if (!id) return null;
@@ -93,13 +103,13 @@
     if (!a) return 0;
     if (a._borrowed) {
       var car = a._carRef;
-      return (car && car.r && car.r.taken) ? (runnerKg(car.r) || cfg().kg || 800) : 0;
+      if (car && car.r && car.r.taken) {
+        return (car.r.unit && car.r.unit.userData && car.r.unit.userData.massKg != null)
+          ? car.r.unit.userData.massKg : (runnerKg(car.r) || cfg().kg || 800);
+      }
+      return 0;
     }
-    if (a.carry) {
-      if (a.carry.userData && a.carry.userData.massKg != null) return a.carry.userData.massKg;
-      if (a.task && a.task.cell) return cargoKg(a.task.cell);
-      return cfg().kg || 800;
-    }
+    if (a.carry) return unitMass(a.carry) || (a.task && a.task.cell ? cargoKg(a.task.cell) : cfg().kg || 800);
     return 0;
   }
   function overloaded(cell) { return on() && cargoKg(cell) > CAP_KG; }
@@ -345,7 +355,9 @@
     on: on, plan: plan, advance: advance, forkSpeed: forkSpeed,
     turnHold: turnHold, noteDone: noteDone, legHold: legHold, legDone: legDone,
     laneBlocked: laneBlocked, laneUntil: laneUntil,
-    cargoKg: cargoKg, runnerKg: runnerKg, massOf: massOf,
+    cargoKg: cargoKg, classKg: classKg, unitMass: unitMass,
+    palletKg: PALLET_KG,
+    runnerKg: runnerKg, massOf: massOf,
     overloaded: overloaded, stampLoad: stampLoad, noteOverloadBlock: noteOverloadBlock,
     get enabled() { return on(); },
     get CAP_KG() { return CAP_KG; }

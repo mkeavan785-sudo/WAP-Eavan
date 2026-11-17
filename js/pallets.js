@@ -101,11 +101,19 @@
   }
 
   /* ---------------- 托盘实体 ---------------- */
+  function stampPalletMass(u, cls) {
+    /* 托盘自身质量：子托 18kg / 母托 28kg / 子母 46kg（sss.docx） */
+    var pk = (WAP.physics && WAP.physics.palletKg) || { sub: 18, mother: 28 };
+    var kg = (cls === 'sub' || cls === 'subMother') ? pk.sub : 0;
+    if (cls === 'mother' || cls === 'subMother') kg += pk.mother;
+    u.userData.massKg = kg;
+    u.userData.palletClass = cls;
+  }
   function makePallet(cls) {
     var rack = WAP.rack;
     var u = rack.makeCargoUnit('carton', (P.seq * 37) % 997, cls);
     u.userData.kind = 'pallet';
-    u.userData.palletClass = cls;
+    stampPalletMass(u, cls);
     return u;
   }
   function releaseFromOtherLedgers(unit) {
@@ -144,7 +152,7 @@
     if (unit.parent) unit.parent.remove(unit);
     P.root.add(unit);
     unit.userData.palletOwned = true;
-    unit.userData.palletClass = cls;
+    stampPalletMass(unit, cls);   // 接管后质量改为纯托盘（不再是货物质量）
     unit.visible = true;
     unit.position.set(x, Math.max(0.06, y), z);
     var rec = { id: 'pl' + (P.seq++), cls: cls, unit: unit,
@@ -317,7 +325,12 @@
     init: init, tick: tick, reset: reset, snapshot: snapshot,
     onGoodsTaken: onGoodsTaken, requestMother: requestMother,
     /* 供外部把「仅剩托盘」直接交给本系统 */
-    leavePallet: function (x, y, z, cls) { return spawnPallet(cls === 'sub' ? 'sub' : 'mother', x, y, z, {}); },
+    /* 支持 7 大类中的托盘组合：子托 / 母托 / 子母托；
+       其余（含带货类）按纯母托处理（拆叠盘机只收母托） */
+    leavePallet: function (x, y, z, cls) {
+      var pk = cls === 'sub' ? 'sub' : (cls === 'subMother' ? 'subMother' : 'mother');
+      return spawnPallet(pk, x, y, z, {});
+    },
     stackOf: stackOf, setStack: setStack,
     chain: chain,
     get units() { return P.units; }

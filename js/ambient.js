@@ -15,6 +15,7 @@
     root: null, ready: false, t: 0,
     chargerGroup: null, chargers: [],       // 7 个视觉桩
     badges: {},                              // carId -> { ring, bar, wrap }
+    masses: {}, massSeq: 0,                  // 质量标签 sprite（货物/托盘）
     lastGeomSig: ''
   };
 
@@ -156,8 +157,128 @@
     });
   }
 
+  /* ---------- 货物 / 托盘质量牌：每个刚体头顶显示自身质量 ----------
+     只读 unit.userData.massKg（由 carrier / pallets / sim stamp），绝不写质量本身。 */
+  function massLabelFor(unit) {
+    var id = unit.userData && unit.userData.muid;
+    if (id && A.masses[id]) return A.masses[id];
+    var kg = (WAP.physics && WAP.physics.unitMass) ? WAP.physics.unitMass(unit) : 0;
+    if (!kg) return null;
+    var isPallet = !!(unit.userData && unit.userData.palletClass);
+    var cv = global.document.createElement('canvas');
+    cv.width = 168; cv.height = 52;
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = isPallet ? 'rgba(60,48,20,.88)' : 'rgba(16,32,48,.88)';
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(2, 2, cv.width - 4, cv.height - 4, 10); ctx.fill(); }
+    else ctx.fillRect(2, 2, cv.width - 4, cv.height - 4);
+    ctx.strokeStyle = isPallet ? '#c99a4a' : '#48b0e0'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.font = 'bold 24px Consolas,monospace';
+    ctx.fillStyle = isPallet ? '#f5c76a' : '#7fe0ff';
+    ctx.textAlign = 'center';
+    ctx.fillText((isPallet ? '托 ' : '货 ') + Math.round(kg) + ' kg', cv.width / 2, 34);
+    var tex = new T.CanvasTexture(cv);
+    var spr = new T.Sprite(new T.SpriteMaterial({ map: tex, transparent: true, depthTest: false, toneMapped: false }));
+    spr.scale.set(1.05, 0.32, 1);
+    spr.userData.kind = 'mass-label';
+    spr.renderOrder = 31;
+    A.root.add(spr);
+    id = id || ('mu' + (++A.massSeq));
+    unit.userData.muid = id;
+    var rec = { sprite: spr, tex: tex, kg: kg, pallet: isPallet };
+    A.masses[id] = rec;
+    return rec;
+  }
+  function updateMassLabels() {
+    var live = {}, n = 0;
+    function scan(root) {
+      if (!root || n >= 60) return;
+      root.traverse(function (o) {
+        if (n >= 60) return;
+        if (o.userData && o.userData.massKg != null) {
+          var rec = massLabelFor(o);
+          if (rec) {
+            live[o.userData.muid] = 1;
+            var p = o.getWorldPosition(new T.Vector3());
+            A.root.worldToLocal(p);
+            rec.sprite.position.set(p.x, p.y + 0.55, p.z);
+            rec.sprite.visible = true;
+            n++;
+          }
+        }
+      });
+    }
+    var c = carrier();
+    if (c && c.root) { scan(c.root); (c.rest || []).forEach(function (q) { if (q.unit) scan(q.unit); }); }
+    var pl = WAP.pallets;
+    if (pl && pl.units) pl.units.forEach(function (q) { if (q.unit) scan(q.unit); });
+    /* 清理已消失单元的质量牌 */
+    Object.keys(A.masses).forEach(function (id) {
+      if (id.indexOf('rack|') === 0) return;   // 库内标签由 updateRackMassLabels 管理
+      if (!live[id]) {
+        var rec = A.masses[id];
+        if (rec.sprite.parent) rec.sprite.parent.remove(rec.sprite);
+        if (rec.tex.dispose) rec.tex.dispose();
+        delete A.masses[id];
+      }
+    });
+    return n;
+  }
+  /* 库内在库货物质量牌：货位是 InstancedMesh，没有独立 Group，
+     这里按 occ 货位坐标直接生成轻量质量牌（抽样，避免上百个标签糊屏）。 */
+  function updateRackMassLabels() {
+    var cur = WAP.rack && WAP.rack.current;
+    if (!cur || !cur.cells) return 0;
+    var kgEach = (WAP.physics && WAP.physics.classKg) ? WAP.physics.classKg(cfg().cargoClass) : 0;
+    if (!kgEach) return 0;
+    var shown = 0, MAX = 36;
+    var selL = null;
+    try { selL = (WAP.state.selection && WAP.state.selection.cell) ? null : null; } catch (e) {}
+    for (var i = 0; i < cur.cells.length && shown < MAX; i++) {
+      var c = cur.cells[i];
+      if (!c.occ || c.conv >= 0 || c.chg) continue;
+      var key = 'rack|' + c.id, rec = A.masses[key];
+      if (!rec) rec = createMassSprite(key, kgEach, false);
+      rec.sprite.position.set(c.x, c.y + 0.45, c.z);
+      rec.sprite.visible = true;
+      A.masses[key] = rec;
+      shown++;
+    }
+    /* 清理不再占用的货位标签 */
+    Object.keys(A.masses).forEach(function (k) {
+      if (k.indexOf('rack|') !== 0) return;
+      var id = k.slice(5), cell = cur.cellById && cur.cellById[id];
+      if (!cell || !cell.occ) {
+        var rec = A.masses[k];
+        if (rec.sprite.parent) rec.sprite.parent.remove(rec.sprite);
+        if (rec.tex.dispose) rec.tex.dispose();
+        delete A.masses[k];
+      }
+    });
+    return shown;
+  }
+  /* 创建一个质量牌 sprite（key 稳定、文字固定） */
+  function createMassSprite(key, kg, pallet) {
+    var cv = global.document.createElement('canvas');
+    cv.width = 168; cv.height = 52;
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = pallet ? 'rgba(60,48,20,.88)' : 'rgba(16,32,48,.88)';
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(2, 2, cv.width - 4, cv.height - 4, 10); ctx.fill(); }
+    else ctx.fillRect(2, 2, cv.width - 4, cv.height - 4);
+    ctx.strokeStyle = pallet ? '#c99a4a' : '#48b0e0'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.font = 'bold 24px Consolas,monospace';
+    ctx.fillStyle = pallet ? '#f5c76a' : '#7fe0ff'; ctx.textAlign = 'center';
+    ctx.fillText((pallet ? '托 ' : '货 ') + Math.round(kg) + ' kg', cv.width / 2, 34);
+    var tex = new T.CanvasTexture(cv);
+    var spr = new T.Sprite(new T.SpriteMaterial({ map: tex, transparent: true, depthTest: false, toneMapped: false }));
+    spr.scale.set(1.05, 0.32, 1);
+    spr.userData.kind = 'mass-label'; spr.renderOrder = 31;
+    A.root.add(spr);
+    return { sprite: spr, tex: tex, kg: kg, pallet: pallet };
+  }
+  function carrier() { return WAP.carrier; }
+
   /* ---------- 屏幕固定物理 HUD：实时速度/载重/状态汇总（看得见的物理） ---------- */
-  function updateHUD(devices, dt) {
+  function updateHUD(devices, dt, massCount) {
     var hud = global.document.getElementById('physHud');
     if (!hud) return;
     var ph = !!cfg().physicsMode;
@@ -195,8 +316,17 @@
         '<i class="ph-bar"><i style="width:' + bar + '%;background:' + color + '"></i></i></div>';
     });
     rowsEl.innerHTML = html || '<div class="ph-empty">无车辆</div>';
+    /* 静态在库货物总质量：按货物大类（含托盘） × 在库货位数 */
+    var mEl = global.document.getElementById('phMass');
+    if (mEl) {
+      var kgEach = (WAP.physics && WAP.physics.classKg) ? WAP.physics.classKg(cfg().cargoClass) : 0;
+      var used = (WAP.state.geom && WAP.state.geom.used) || 0;
+      var tons = kgEach * used / 1000;
+      mEl.textContent = '在库 ' + used + ' 位 × ' + Math.round(kgEach) + 'kg ＝ ' + tons.toFixed(1) + ' t（含托盘）';
+    }
     var foot = global.document.getElementById('phFoot');
-    if (foot) foot.textContent = '峰值 ' + maxV.toFixed(2) + ' m/s · 避让 ' + dodging + ' 台 · 充电 ' + charging + ' 台';
+    if (foot) foot.textContent = '峰值 ' + maxV.toFixed(2) + ' m/s · 质量牌 ' + (massCount || 0) +
+      ' 件 · 避让 ' + dodging + ' · 充电 ' + charging;
   }
 
   /* ---------- 每帧：只读状态 → 驱动视觉 ---------- */
@@ -270,8 +400,12 @@
       if (k >= idx) ch.led.color.multiplyScalar(0.5 + 0.5 * breathe);
     });
 
-    /* 屏幕 HUD：把每台车的真实速度/载重/状态显示出来 */
-    updateHUD(devices, dt);
+    /* 货物 / 托盘质量牌（在途 + 库内抽样）+ 屏幕 HUD */
+    var massCount = 0;
+    if (cfg().physicsMode) {
+      massCount = updateMassLabels() + updateRackMassLabels();
+    }
+    updateHUD(devices, dt, massCount);
   }
 
   function levelY(L) {
