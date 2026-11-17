@@ -460,7 +460,52 @@
     syncCargo();
   }
 
+  /* 货物总数控件：上限=geom.capacity（真实可放货位），下限 0；同步随机分布选项 */
+  function syncCargoCount() {
+    var g = WAP.state.geom, cfg = WAP.state.cfg;
+    if (!g) return;
+    var cap = g.capacity != null ? g.capacity : g.slots;
+    var n = cfg.cargoCount >= 0 ? cfg.cargoCount : g.used;
+    var rng = $('rngCargoCount');
+    if (rng) { rng.max = Math.max(1, cap); if (D.activeElement !== rng) rng.value = n; }
+    var v = $('valCargoCount'); if (v) v.textContent = n;
+    var cp = $('capCargoCount'); if (cp) cp.textContent = cap;
+    var chk = $('chkCargoRandom'); if (chk) chk.checked = !!cfg.cargoRandom;
+    var res = $('numCargoReserve'); if (res && D.activeElement !== res) res.value = cfg.cargoReserve;
+  }
+  /* 应用货物总数：停仿真→清占用覆盖→改 cfg→一次 commit（守恒账本随 used 重算） */
+  function applyCargoCount(n, random, reserve) {
+    var g = WAP.state.geom;
+    var cap = g && g.capacity != null ? g.capacity : (g ? g.slots : 0);
+    var c = core.clone(WAP.state.cfg);
+    c.cargoCount = Math.max(0, Math.min(cap, Math.round(+n || 0)));
+    c.cargoRandom = !!random;
+    c.cargoReserve = Math.max(0, Math.min(3, Math.round(+reserve || 0)));
+    var err = core.validate(c);
+    if (err) { toast(err); syncCargoCount(); return; }
+    if (WAP.sim && WAP.sim.playing) WAP.sim.stop();   // 让 flow 归还 pool 货物
+    WAP.state.overrides = {};                         // 清掉还回写入的占用覆盖，保证新分布生效
+    WAP.state.cfg = c;
+    WAP.app.commit();
+    syncCargoCount();
+    /* 显示实际落位数：随机分布会预留通道，实际可能少于设定值 */
+    var placed = WAP.state.geom ? WAP.state.geom.used : c.cargoCount;
+    toast('货物总数 → ' + placed + ' 位' + (c.cargoRandom ? '（随机分布·已预留通道）' : '') +
+      (placed < c.cargoCount ? ' · 设定 ' + c.cargoCount + ' 位' : ''));
+  }
+  function bindCargoCount() {
+    var rng = $('rngCargoCount'); if (!rng) return;
+    var chk = $('chkCargoRandom'), res = $('numCargoReserve');
+    rng.addEventListener('input', function () {
+      var v = $('valCargoCount'); if (v) v.textContent = rng.value;
+      applyCargoCount(rng.value, chk && chk.checked, res && res.value);
+    });
+    if (chk) chk.addEventListener('change', function () { applyCargoCount(rng.value, chk.checked, res && res.value); });
+    if (res) res.addEventListener('change', function () { applyCargoCount(rng.value, chk && chk.checked, res.value); });
+  }
+
   function syncCargo() {
+    syncCargoCount();
     var c = WAP.state.cfg.cargoType;
     var counts = WAP.state.cargoCounts || {};
     $('cargoGrid').querySelectorAll('.cargo-opt').forEach(function (b) {
@@ -959,6 +1004,22 @@
     get all() { return ctxState.all; }
   };
 
+  /* 货架结构件统计：与 rack.js build() 建模同源（按 sss.docx 一个货位的结构组成）
+     立柱=通高立柱(上下立柱)；横梁=每层整跨梁(前梁+后梁)；子轨=bayX×blocks×2/层；
+     主轨=主通道×2/层；换向轨=提升机口 convCell（匹配数×层）。 */
+  function frameCounts(c, g) {
+    var st = (g.stations || []).length;
+    var xLines = (g.gEdges || []).reduce(function (n, seg) {
+      return n + Math.round((seg[1] - seg[0]) / c.bayW) + 1;
+    }, 0);
+    return {
+      upright: xLines * st,
+      beam: c.levels * (g.gEdges || []).length * st,
+      sub: c.levels * (g.bayX || []).length * (g.blocks || []).length * 2,
+      main: c.levels * (g.tracks || []).length * 2,
+      rev: Object.keys(g.convCell || {}).length
+    };
+  }
   /* ---------- 刷新 ---------- */
   function refresh() {
     var c = WAP.state.cfg, g = WAP.state.geom;
@@ -996,6 +1057,13 @@
       ((g.blocks || []).length || (c.depths || []).length) + ' 个储区');
     var matched = ((g.liftSites || []).filter(function (o) { return o.matched !== false; })).length;
     setOv('ovConv', matched + ' 组 · 末端对接主通道');
+    /* 货架结构件实时数量 */
+    var fc = frameCounts(c, g), nf = function (v) { return v.toLocaleString('zh-CN'); };
+    setOv('ovUpright', nf(fc.upright) + ' 根');
+    setOv('ovBeam', nf(fc.beam) + ' 根');
+    setOv('ovSubRail', nf(fc.sub) + ' 根');
+    setOv('ovMainRail', nf(fc.main) + ' 根');
+    setOv('ovRevRail', nf(fc.rev) + ' 组（提升机口）');
     syncCellPitch();
     syncFields();
     refreshAddMenu();
@@ -1007,6 +1075,7 @@
     buildFields();
     buildCargo();
     buildCargoClasses();
+    bindCargoCount();
     buildShuttleColors();
     bindQuick();
     bindView();

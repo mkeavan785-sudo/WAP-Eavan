@@ -238,7 +238,8 @@
     var k = cell && ov[cell.id];
     if (k && k !== 'auto' && WAP.core.CARGO_CLASS_KEYS.indexOf(k) >= 0) return k;
     var g = WAP.state.cfg.cargoClass;
-    return WAP.core.CARGO_CLASS_KEYS.indexOf(g) >= 0 ? g : 'single';
+    if (WAP.core.CARGO_CLASS_ALIAS[g]) return WAP.core.CARGO_CLASS_ALIAS[g];
+    return WAP.core.CARGO_CLASS_KEYS.indexOf(g) >= 0 ? g : 'goods';
   }
 
   /* ---------------- 单一货源：静态实例与在途货物共用同一份外观 ----------------
@@ -255,7 +256,12 @@
 
   function cargoUnitParts(kind, cfg, g, seed, cls) {
     unitGeo();
-    cls = cls || 'single';
+    cls = cls || 'goods';
+    /* 旧 key 兼容（老存档 / 内部调用） */
+    if (cls === 'single') cls = 'goods';
+    else if (cls === 'combo') cls = 'goodsCombo';
+    var def = WAP.core.CARGO_CLASS_DEF[cls] || WAP.core.CARGO_CLASS_DEF.goods;
+    var hasGoods = !!def.goods, hasSub = !!def.sub, hasMother = !!def.mother;
     var bw = Math.min(1.2, cfg.bayW * 0.84);
     var bd = Math.min(1.0, cfg.dp * 0.86);
     var ch = Math.max(0.2, Math.min(g.loadH, cfg.pitch - 0.34));
@@ -264,25 +270,22 @@
       parts.push({ key: key, geo: geo, mat: mat, x: x, y: y, z: z,
         sx: sx, sy: sy, sz: sz, ry: ry || 0, rz: rz || 0 });
     }
-    /* 空托盘大类：光子托盘（棕）/ 光母托盘（银），完全没有货物箱体 */
-    if (cls === 'sub' || cls === 'mother') {
-      var isSub = cls === 'sub';
-      part(isSub ? 'palletSub' : 'palletMother', UNIT_BOX,
-        isSub ? MM.palletSub() : MM.palletMother(),
-        0, 0.055, 0, bw * (isSub ? 0.92 : 1.06), 0.11, bd * (isSub ? 0.92 : 1.06));
-      return parts;
+    /* 「空」大类：不显示任何货物或托盘（货位仍占位） */
+    if (cls === 'empty') return parts;
+    /* 托盘层从下到上：银色母托盘(y≈0.05) → 棕色子托盘(y≈0.145) → 货物。
+       七个大类由此三层的有无组合而成。 */
+    var baseY = 0.02;
+    if (hasMother) { part('palletMother', UNIT_BOX, MM.palletMother(), 0, 0.05, 0, bw * 1.06, 0.10, bd * 1.06); baseY = 0.10; }
+    if (hasSub) {
+      var subY = hasMother ? 0.145 : 0.055;
+      part('palletSub', UNIT_BOX, MM.palletSub(), 0, subY, 0,
+        bw * (hasMother ? 0.94 : 0.92), 0.09, bd * (hasMother ? 0.94 : 0.92));
+      baseY = hasMother ? 0.19 : 0.10;
     }
-    /* 无托盘单货物：货物直接坐在货位梁面上，不带任何托盘；
-       子母托盘：下银母托盘 + 上棕子托盘，货物再叠在上面。 */
-    var baseY;
-    if (cls === 'combo') {
-      part('palletMother', UNIT_BOX, MM.palletMother(), 0, 0.05, 0, bw * 1.06, 0.10, bd * 1.06);
-      part('palletSub', UNIT_BOX, MM.palletSub(), 0, 0.145, 0, bw * 0.94, 0.09, bd * 0.94);
-      baseY = 0.19;
-      ch = Math.max(0.2, Math.min(ch, cfg.pitch - 0.55));   // 两层托盘更高，货箱相应收矮
-    } else {
-      baseY = 0.02;
-    }
+    /* 无货物的大类（仅托盘）到此结束 */
+    if (!hasGoods) return parts;
+    if (baseY > 0.02) ch = Math.max(0.2, Math.min(ch, cfg.pitch - 0.34 - (baseY - 0.02)));
+    if (baseY === 0.02) baseY = 0.02;   // 无托盘货物直接坐梁面
     var by = baseY + ch / 2;
     if (kind === 'sack') {
       var sw = bw * 0.47, sd = bd * 0.44, sh = Math.max(0.14, Math.min(ch * 0.46, 0.34));
@@ -324,10 +327,10 @@
   /* 生成一个独立货物单元（原点在货位中心、y=0 为该层梁面） */
   function makeCargoUnit(kind, seed, cls) {
     var parts = cargoUnitParts(kind, WAP.state.cfg, WAP.state.geom, seed || 0,
-      cls || WAP.state.cfg.cargoClass || 'single');
+      cls || WAP.state.cfg.cargoClass || 'goods');
     var grp = new T.Group();
     grp.userData.kind = 'cargo';
-    grp.userData.cargoClass = cls || WAP.state.cfg.cargoClass || 'single';
+    grp.userData.cargoClass = cls || WAP.state.cfg.cargoClass || 'goods';
     parts.forEach(function (p) {
       var m = new T.Mesh(p.geo, p.mat);
       m.position.set(p.x, p.y, p.z);
@@ -342,7 +345,7 @@
 
   /* 给一个容器换上指定种类的货物（用于提升机载货台 / 输送线缓存位 / 转运动画） */
   function setUnitSkin(holder, kind, seed, cls) {
-    var cc = cls || WAP.state.cfg.cargoClass || 'single';
+    var cc = cls || WAP.state.cfg.cargoClass || 'goods';
     if (holder.userData.cargoKind === kind && holder.userData.cargoClass === cc) return;
     while (holder.children.length) holder.remove(holder.children[0]);
     holder.add(makeCargoUnit(kind, seed, cc));

@@ -145,6 +145,21 @@
     group.userData.devId = id;
     group.traverse(function (n) { n.userData.kind = 'equipment'; n.userData.devId = id; });
   }
+  /* 气氛动作分档：work=真作业(路线运行/被 carrier 锁定)、
+     idle=无路线占用的循环待机(拣选/搬运演示)、run=全局仿真在播、
+     still=已设计路线但当前不跑→静止待命。
+     注意 anim.step 第 2 参在 idle 下也是 true，区分档位必须读 ctx。 */
+  function animMode(runFlag, ctx) {
+    if (ctx && ctx.engaged) return 'work';
+    if (ctx && ctx.idle) return 'idle';
+    return runFlag ? 'run' : 'still';
+  }
+  /* 关节枢轴：Group 作为可旋转/平移的关节，子 mesh 用相对坐标 */
+  function joint(parent, tag, x, y, z, m, w, h, d, ox, oy, oz) {
+    var j = new T.Group(); j.position.set(x, y, z); j.userData.eqPart = tag;
+    if (m && w) box(j, w, h, d, m, ox || 0, oy || 0, oz || 0);
+    parent.add(j); return j;
+  }
   function disposeGroup(o) {
     if (!o) return;
     o.traverse(function (n) {
@@ -441,21 +456,38 @@
     var vest = mat(0xf59e0b, { roughness: 0.78, metalness: 0.02 });
     var pants = mat(0x27364a, { roughness: 0.86, metalness: 0.02 });
     var helm = mat(0xffd43b, { roughness: 0.6, metalness: 0.05 });
-    box(g, 0.42, 0.62, 0.27, vest, 0, 1.12, 0);
-    box(g, 0.34, 0.30, 0.25, pants, 0, 0.72, 0);
+    box(g, 0.42, 0.62, 0.27, vest, 0, 1.12, 0);       // 躯干（工服）
+    box(g, 0.34, 0.30, 0.25, pants, 0, 0.72, 0);      // 髋
+    /* 腿 / 手臂 / 前臂全部用枢轴 Group，动作绕关节转 */
     [-1, 1].forEach(function (sx) {
-      var leg = box(g, 0.14, 0.68, 0.16, pants, sx * 0.11, 0.35, 0);
-      leg.userData.eqPart = 'leg';
-      box(g, 0.12, 0.56, 0.13, vest, sx * 0.29, 1.10, 0);
+      var side = sx < 0 ? 'L' : 'R';
+      joint(g, 'leg' + side, sx * 0.11, 0.68, 0, pants, 0.14, 0.68, 0.16, 0, -0.34, 0);
+      var sh = joint(g, 'arm' + side, sx * 0.29, 1.34, 0, vest, 0.12, 0.34, 0.13, 0, -0.17, 0);
+      joint(sh, 'fore' + side, 0, -0.34, 0, skin, 0.11, 0.28, 0.12, 0, -0.14, 0);
     });
+    /* 头 + 安全帽挂在颈部枢轴上（拣选时低头看屏/看货位） */
+    var neck = joint(g, 'headPivot', 0, 1.44, 0);
     var head = new T.Mesh(new T.SphereGeometry(0.16, 14, 10), skin);
-    head.position.set(0, 1.57, 0); g.add(head);
+    head.position.set(0, 0.13, 0); neck.add(head);
     var cap = new T.Mesh(new T.SphereGeometry(0.175, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), helm);
-    cap.position.set(0, 1.60, 0); g.add(cap);
+    cap.position.set(0, 0.16, 0); neck.add(cap);
     g.userData.eqMeta = { actor: 'person' };
-    return { group: g, dims: [0.62, 1.78, 0.42], anim: { step: function (dt, run, t) {
+    return { group: g, dims: [0.62, 1.78, 0.42], anim: { step: function (dt, runFlag, t, ctx) {
+      var mode = animMode(runFlag, ctx);
+      var walk = mode === 'work' ? 1 : mode === 'run' ? 0.8 : mode === 'idle' ? 0.32 : 0;
+      var pick = mode === 'work' ? 1 : mode === 'idle' ? 0.5 : 0;   // 拣选幅度
       g.traverse(function (o) {
-        if (o.userData.eqPart === 'leg') o.rotation.x = run ? 0.24 * Math.sin(t * 5) : 0;
+        var p = o.userData && o.userData.eqPart; if (!p) return;
+        if (p === 'legL' || p === 'legR')
+          o.rotation.x = walk * 0.42 * Math.sin(t * 5) * (p === 'legL' ? 1 : -1);
+        else if (p === 'armL' || p === 'armR') {
+          var reach = pick * Math.max(0, Math.sin(t * 1.2));
+          o.rotation.x = -reach * 1.15 + walk * 0.18 * Math.sin(t * 5 + (p === 'armL' ? Math.PI : 0));
+          o.rotation.z = (p === 'armR' ? 1 : -1) * (0.06 + pick * 0.10);
+        } else if (p === 'foreL' || p === 'foreR')
+          o.rotation.x = pick * 0.55 * Math.max(0, Math.sin(t * 1.2));
+        else if (p === 'headPivot')
+          o.rotation.y = pick * 0.28 * Math.sin(t * 0.7);
       });
     } } };
   }
@@ -463,39 +495,51 @@
     var g = new T.Group(), S = shared();
     var body = mat(0xf0a500, { roughness: 0.55, metalness: 0.22 });
     var dark = mat(0x222b38, { roughness: 0.8, metalness: 0.1 });
-    box(g, 1.32, 0.52, 0.86, body, -0.30, 0.42, 0);
-    box(g, 0.62, 0.44, 0.80, body, -0.62, 0.94, 0);
-    box(g, 0.66, 0.07, 0.88, dark, -0.30, 1.20, 0);
+    box(g, 1.32, 0.52, 0.86, body, -0.30, 0.42, 0);       // 车身
+    box(g, 0.62, 0.44, 0.80, body, -0.62, 0.94, 0);       // 驾驶室
+    box(g, 0.66, 0.07, 0.88, dark, -0.30, 1.20, 0);       // 顶棚
     [-1, 1].forEach(function (sz) {
       box(g, 0.07, 0.07, 0.07, dark, -0.62, 1.24, sz * 0.42);
-      box(g, 0.09, 1.42, 0.09, S.steelDark, 0.58, 0.71, sz * 0.31);
-      box(g, 0.90, 0.055, 0.10, S.steelDark, 1.00, 0.13, sz * 0.27);
+      box(g, 0.09, 1.42, 0.09, S.steelDark, 0.58, 0.71, sz * 0.31); // 门架导轨（静）
       [-1, 1].forEach(function (sx) {
         var w = new T.Mesh(new T.CylinderGeometry(0.19, 0.19, 0.13, 14), dark);
         w.rotation.x = Math.PI / 2;
         w.position.set(sx > 0 ? 0.16 : -0.86, 0.19, sz * 0.46);
-        g.add(w);
+        w.userData.eqPart = 'wheel'; g.add(w);
       });
     });
-    var mast = box(g, 0.56, 0.30, 0.70, S.steelDark, 0.58, 1.32, 0);
-    mast.userData.eqPart = 'mast';
+    /* 滑架（可沿门架升降）+ 货叉（可前伸插入托盘） */
+    var carriage = joint(g, 'carriage', 0.58, 0.40, 0, S.steelDark, 0.56, 0.24, 0.70, 0, 0, 0);
+    [-1, 1].forEach(function (sz) {
+      var fk = box(carriage, 0.90, 0.055, 0.10, S.steelDark, 0.42, -0.20, sz * 0.27);
+      fk.userData.eqPart = 'fork';
+    });
     g.userData.eqMeta = { actor: 'forklift' };
-    return { group: g, dims: [2.15, 1.55, 1.02], anim: { step: function (dt, run, t) {
-      mast.position.y = run ? 1.32 + 0.10 * Math.sin(t * 1.6) : 1.32;
+    return { group: g, dims: [2.15, 1.55, 1.02], anim: { step: function (dt, runFlag, t, ctx) {
+      var mode = animMode(runFlag, ctx);
+      var cyc = 0.5 + 0.5 * Math.sin(t * 0.85);
+      var lift = mode === 'work' ? 0.62 * cyc : mode === 'idle' ? 0.06 * (0.5 + 0.5 * Math.sin(t * 1.2)) : 0;
+      g.traverse(function (o) {
+        var p = o.userData && o.userData.eqPart; if (!p) return;
+        if (p === 'carriage') o.position.y = 0.40 + lift;
+        else if (p === 'fork') o.rotation.z = mode === 'work' ? -0.05 * cyc : 0;
+        else if (p === 'wheel') o.rotation.y += dt * (mode === 'work' ? 3.2 : mode === 'run' ? 2 : 0);
+      });
     } } };
   }
   function buildAGV(d) {
     var g = new T.Group();
     var shell = mat(0x3b82f6, { roughness: 0.48, metalness: 0.32 });
     var dark = mat(0x1f2937, { roughness: 0.82, metalness: 0.08 });
-    box(g, 1.42, 0.30, 1.02, shell, 0, 0.25, 0);
-    box(g, 1.16, 0.05, 0.86, dark, 0, 0.42, 0);
+    box(g, 1.42, 0.30, 1.02, shell, 0, 0.25, 0);       // 底盘
+    /* 顶升台（驮货演示：到站顶起、退出下降）——只是 AMR 自身机构，绝不挂真货 */
+    joint(g, 'liftDeck', 0, 0.36, 0, dark, 1.16, 0.05, 0.86, 0, 0.06, 0);
     [-1, 1].forEach(function (sz) {
       [-1, 1].forEach(function (sx) {
         var w = new T.Mesh(new T.CylinderGeometry(0.12, 0.12, 0.09, 12), dark);
         w.rotation.x = Math.PI / 2;
         w.position.set(sx * 0.52, 0.12, sz * 0.52);
-        g.add(w);
+        w.userData.eqPart = 'wheel'; g.add(w);
       });
     });
     var beacon = new T.Mesh(new T.CylinderGeometry(0.075, 0.075, 0.10, 12),
@@ -504,9 +548,20 @@
     beacon.userData.eqPart = 'beacon';
     g.add(beacon);
     g.userData.eqMeta = { actor: 'agv' };
-    return { group: g, dims: [1.46, 0.58, 1.06], anim: { step: function (dt, run, t) {
-      beacon.material.opacity = run ? 0.45 + 0.55 * Math.abs(Math.sin(t * 4)) : 1;
-      beacon.material.transparent = true;
+    return { group: g, dims: [1.46, 0.58, 1.06], anim: { step: function (dt, runFlag, t, ctx) {
+      var mode = animMode(runFlag, ctx);
+      var rise = mode === 'work' ? 0.10 * Math.max(0, Math.sin(t * 1.05))
+        : mode === 'idle' ? 0.012 * (0.5 + 0.5 * Math.sin(t * 1.5)) : 0;
+      g.traverse(function (o) {
+        var p = o.userData && o.userData.eqPart; if (!p) return;
+        if (p === 'liftDeck') o.position.y = 0.36 + rise;
+        else if (p === 'wheel') o.rotation.y += dt * (mode === 'work' ? 3.4 : mode === 'run' ? 2.2 : 0);
+        else if (p === 'beacon') {
+          o.material.transparent = true;
+          o.material.opacity = mode === 'still' ? 1
+            : 0.45 + 0.55 * Math.abs(Math.sin(t * (mode === 'work' ? 5 : 3)));
+        }
+      });
     } } };
   }
   function buildTruck(d) {
@@ -514,20 +569,38 @@
     var cab = mat(0x2563eb, { roughness: 0.5, metalness: 0.28 });
     var boxM = mat(0xdbe3ee, { roughness: 0.72, metalness: 0.12 });
     var dark = mat(0x1b2430, { roughness: 0.85, metalness: 0.06 });
-    box(g, 3.30, 2.02, 1.86, boxM, -0.60, 1.42, 0);
-    box(g, 1.18, 1.48, 1.80, cab, 1.72, 1.08, 0);
-    box(g, 0.06, 0.52, 1.56, dark, 2.31, 1.30, 0);
-    box(g, 4.10, 0.20, 1.90, dark, 0.30, 0.40, 0);
+    /* 车厢以车尾下缘为铰点（卸货时轻微抬升，角度控制在 6° 内） */
+    var hinge = joint(g, 'cargoPivot', -2.20, 0.52, 0);
+    var cargoBox = box(hinge, 3.30, 2.02, 1.86, boxM, 1.60, 0.90, 0);
+    cargoBox.userData.eqPart = 'truckCargo';
+    box(g, 1.18, 1.48, 1.80, cab, 1.72, 1.08, 0);         // 驾驶室（+X 车头）
+    box(g, 0.06, 0.52, 1.56, dark, 2.31, 1.30, 0);        // 前脸
+    box(g, 4.10, 0.20, 1.90, dark, 0.30, 0.40, 0);        // 底盘
+    /* 尾门 + 液压尾板（-X 车尾，靠泊装卸） */
+    var door = joint(g, 'rearDoor', -2.26, 0.52, 0, dark, 0.06, 1.20, 1.70, 0, 0.60, 0);
+    var gate = joint(g, 'tailLift', -2.30, 0.52, 0, dark, 0.06, 0.90, 1.60, -0.04, 0.45, 0);
     [-1, 1].forEach(function (sz) {
       [-1.55, 0.35, 1.86].forEach(function (x) {
         var w = new T.Mesh(new T.CylinderGeometry(0.34, 0.34, 0.18, 16), dark);
         w.rotation.x = Math.PI / 2;
         w.position.set(x, 0.34, sz * 0.94);
+        w.userData.eqPart = 'wheel';
         g.add(w);
       });
     });
     g.userData.eqMeta = { actor: 'truck' };
-    return { group: g, dims: [4.30, 2.44, 1.92], anim: null };
+    return { group: g, dims: [4.30, 2.44, 1.92], anim: { step: function (dt, runFlag, t, ctx) {
+      var mode = animMode(runFlag, ctx);
+      var cyc = 0.5 + 0.5 * Math.sin(t * 0.75);
+      g.traverse(function (o) {
+        var p = o.userData && o.userData.eqPart; if (!p) return;
+        if (p === 'wheel') o.rotation.y += dt * (mode === 'work' ? 2.6 : mode === 'run' ? 3 : mode === 'idle' ? 0.25 : 0);
+        else if (p === 'cargoPivot') o.rotation.z = mode === 'work' ? -0.09 * cyc : 0;  // 车厢轻抬卸货
+        else if (p === 'rearDoor') o.rotation.y = mode === 'work' ? -0.9 * cyc : 0;     // 尾门侧开
+        else if (p === 'tailLift') o.rotation.z = mode === 'work' ? -1.1 * cyc : 0;     // 尾板落下
+        else if (p === 'truckCargo') o.position.y = 0.90 + (mode === 'idle' ? 0.012 * Math.sin(t * 1.1) : 0);
+      });
+    } } };
   }
   /* 外围四边框：四角立柱 + 上/下四边横梁的长方体镂空框架。
      原本用在检测门上，现在按用户要求改作「拆叠盘机」的主体外形。 */
@@ -662,7 +735,7 @@
         });
         if (hasCargo) {
           var unit = WAP.rack.makeCargoUnit(cargoKindForSingle(d, lv), lv * 7 + idx + 3,
-            d.cargoClass || c.cargoClass || 'single');
+            d.cargoClass || c.cargoClass || 'goods');
           unit.position.set(cx, y, cz);
           g.add(unit); cargoCount++;
         }
@@ -765,8 +838,11 @@
     var sites = g.liftSites || [], s = sites[0];
     var ax = s ? s.x : g.x0;
     var az = s ? (s.side === 'back' ? g.z1 + DOCK_OFF : g.z0 - DOCK_OFF) : g.z0 - CLEAR;
-    function mod(v) { return ((v % CELL) + CELL) % CELL; }
-    return { x: mod(ax), z: mod(az), anchorX: ax, anchorZ: az };
+    /* 关键：原点严格等于提升机接驳位（不再 mod(CELL) 回绕）。
+       若取 mod，ax 跨过 CELL 整数倍时 snap 会突跳一整格，而 D 对接格
+       （x=s.x 连续跟随）不动 → 第一台与后续辊道机错开一格，即「输送线异位」。
+       直接锚定后 G|0|j 的 x 恒等于塔位 x，整条线随提升机连续平移。 */
+    return { x: ax, z: az, anchorX: ax, anchorZ: az };
   }
   function dockZ(site) {
     var g = geom();
@@ -1384,6 +1460,22 @@
     if (c.liftCols) return c.liftCols.map(function (o) { return { id: o.id, i: o.i }; });
     return (g.liftSites || []).map(function (s) { return { id: s.id, i: s.i }; });
   }
+  /* 输送设备建模时货流沿本地 +X；货架子通道是 Z 向。
+     放在库体前后两侧（对接格 / 库外）的输送线必须转向 90°（X→Z）才与子通道一致；
+     放在左右两侧则保持 0°。用户手动旋转过（yawManual）的不再自动摆正。 */
+  var FLOW_TYPES = { roller: 1, chain: 1, transfer: 1, destacker: 1 };
+  function flowAxisOf(cell) {
+    var g = geom();
+    if (!g || !cell) return 'z';
+    if (cell.dockLift || cell.dockSide) return 'z';
+    if (cell.z < g.z0 - 0.2 || cell.z > g.z1 + 0.2) return 'z';
+    if (cell.x < g.x0 - 0.2 || cell.x > g.x1 + 0.2) return 'x';
+    return 'z';
+  }
+  function flowYawForCell(type, cell) {
+    if (!FLOW_TYPES[type]) return 0;
+    return flowAxisOf(cell) === 'z' ? 90 : 0;
+  }
 
   /* ---------------- 生命周期 / 持久化 ---------------- */
   function nextCode(type) {
@@ -1398,7 +1490,10 @@
         devices: E.devices.map(function (d) {
           return {
             id: d.id, type: d.type, code: d.code, cellKey: d.cellKey, yaw: d.yaw,
+            yawManual: !!d.yawManual,
             demo: !!d.demo, liftId: d.liftId || null, deck: d.deck || 0,
+            dockRef: d.dockRef ? { liftId: d.dockRef.liftId, side: d.dockRef.side,
+              dc: d.dockRef.dc, dr: d.dockRef.dr } : null,
             solid: d.solid !== false, free: d.free || null, size: d.size || null,
             joined: d.joined || null, template: !!d.template,
             /* 发货器 / 收货器 / 单货架 */
@@ -1426,7 +1521,11 @@
         var d = {
           id: s.id || ('eq' + E.seq), type: s.type, code: s.code || nextCode(s.type), name: '',
           cellKey: s.cellKey, yaw: clamp(Number(s.yaw) || 0, -360, 360),
+          yawManual: !!s.yawManual,
           demo: !!s.demo, liftId: s.liftId || null,
+          dockRef: s.dockRef && s.dockRef.liftId ? {
+            liftId: s.dockRef.liftId, side: s.dockRef.side === 'back' ? 'back' : 'front',
+            dc: Number(s.dockRef.dc) || 0, dr: Number(s.dockRef.dr) || 0 } : null,
           deck: clamp(Number(s.deck) || 0, 0, 11), solid: s.solid !== false,
           free: s.free || null, size: Array.isArray(s.size) ? s.size.slice(0, 3) : null,
           joined: s.joined || null, template: !!s.template,
@@ -1528,13 +1627,14 @@
     if (!cell || !canPlace(probe, cell)) { toast('当前没有可用的移动格子'); return null; }
     var d = {
       id: 'eq' + (E.seq++), type: type, code: nextCode(type), name: '',
-      cellKey: key, yaw: clamp(Number(opt.yaw) || 0, -360, 360),
+      cellKey: key,
+      yaw: opt.yaw != null ? clamp(Number(opt.yaw) || 0, -360, 360) : flowYawForCell(type, cell),
       demo: false, liftId: null, deck: 0, solid: true,
       free: null, size: null, group: null, anim: null, dims: [1.6, 1, 1.4],
       template: !!opt.template,
       bindId: opt.bindId || null,
       cargoKind: opt.cargoKind || cfg().cargoType || 'carton',
-      cargoClass: opt.cargoClass || cfg().cargoClass || 'single',
+      cargoClass: opt.cargoClass || cfg().cargoClass || 'goods',
       rate: clamp(Number(opt.rate) || 2.5, 0.4, 12),
       singleCells: [], singleLevels: opt.singleLevels || mainLevels(),
       singlePitch: opt.singlePitch || null,
@@ -1721,6 +1821,69 @@
     rebuildGrid(); save(); renderCatalog();
     toast('已删除 ' + d.name);
   }
+  /* 批量清空设备（清空场景用）。includeLift=true 时连库内提升机一起移除：
+     lift 是双重表示（E.devices + cfg.liftCols/liftCfg），必须同步清零再 commit。
+     返回删除数量。 */
+  function clearDevices(includeLift) {
+    var n = E.devices.length;
+    if (!n) return 0;
+    if (E.cellPick) stopCellPick();
+    E.devices.forEach(function (d) { if (d.group) { E.root.remove(d.group); disposeGroup(d.group); } });
+    E.devices = [];
+    E.selected = null; E.editMode = false;
+    if (WAP.ui && WAP.ui.showDeviceDock) WAP.ui.showDeviceDock(false);
+    clearEngaged();
+    if (includeLift) {
+      var c = cfg();
+      c.liftCols = []; c.liftN = 0;
+      if (c.liftCfg) c.liftCfg = {};
+      WAP.core.save(c);
+      WAP.app.commit(true);   /* 一次重建：库内提升机塔身/层间输送线同步消失 */
+    }
+    rebuildGrid(); save(); renderCatalog();
+    return n;
+  }
+
+  /* 从设备面板拖到画布摆放：把落点映射到最近可用格，再复用 add()/addLift()。
+     所有 15 类都能拖；提升机走 addLift 分支，单货架进入选格流程。 */
+  function dropDevice(type, e) {
+    if (!TYPES[type]) return null;
+    var dev = deviceHit(e);
+    var hitDev = dev ? devById(dev.id) : null;
+    var cell = hitDev ? E.cellMap[hitDev.cellKey] : null;
+    if (!cell) {
+      var pw = rayPlaneWorld(e, WAP.scene.S.modelRoot.position.y);
+      if (!pw) return null;
+      var loc = WAP.scene.S.modelRoot.worldToLocal(pw.clone());
+      var probe = { type: type, id: '__drop__' };
+      cell = nearestCell(loc.x, loc.z, 0, null, probe, { x: loc.x, z: loc.z });
+    }
+    if (!cell) { toast('落点没有可用格子'); return null; }
+    if (type === 'lift') {
+      var side = sideOfCell(cell) || 'front';
+      if (!liftNearMouthCell(cell)) { toast('提升机需放在货架前/后侧的对接格'); return addLift(); }
+      return addLift({ cellKey: cell.key, side: side });
+    }
+    if (type === 'single') return add('single');  // 进入货位选格流程
+    return add(type, { key: cell.key, yaw: flowYawForCell(type, cell) });
+  }
+
+  /* 外部输送线跟随提升机接驳位：设备铺线时记下「相对某台提升机对接格的格偏移」
+     (dockRef)，库体重建后按最新对接格重算 cellKey，避免拉伸货架后整条线错位。
+     只处理有 dockRef 的输送设备；提升机/普通设备/虚拟点位不受影响。 */
+  function reanchorLineDevices() {
+    var changed = false;
+    E.devices.forEach(function (d) {
+      var ref = d.dockRef;
+      if (!ref || !ref.liftId) return;
+      var dockKey = 'D|' + ref.liftId + '|' + (ref.side === 'back' ? 'back' : 'front');
+      var dock = E.cellMap[dockKey];
+      if (!dock || !isFinite(dock.col) || !isFinite(dock.row)) return;
+      var key = 'G|' + (dock.col + ref.dc) + '|' + (dock.row + ref.dr);
+      if (E.cellMap[key] && key !== d.cellKey) { d.cellKey = key; changed = true; }
+    });
+    return changed;
+  }
 
   function refreshAfterChange() {
     rebuildGrid(); save(); updateMark();
@@ -1752,6 +1915,11 @@
     dev.level = c.level;
     dev.group.position.set(c.x, c.y, c.z);
     dev.x = c.x; dev.y = c.y; dev.z = c.z;
+    /* 拖到新格后自动摆正输送方向（用户手动旋转过的除外） */
+    if (FLOW_TYPES[dev.type] && !dev.yawManual) {
+      dev.yaw = flowYawForCell(dev.type, c);
+      dev.group.rotation.y = dev.yaw * Math.PI / 180;
+    }
     autoBindTerminal(dev, c);
   }
   /* 提升机移动到新格子后：同步 BAY 列、前端/对面侧，并让离开子通道口的
@@ -2349,6 +2517,7 @@
     var d = selectedDevice();
     if (!d) return;
     d.yaw = ((Math.round((d.yaw + delta) / 90) * 90) % 360 + 360) % 360;
+    d.yawManual = true;   // 手动转向后不再被自动摆正覆盖
     d.group.rotation.y = d.yaw * Math.PI / 180;
     if (d.type === 'wall') {
       snapWallEdges(d);
@@ -2794,6 +2963,30 @@
   function clearEngaged() {
     E.devices.forEach(function (d) { d.engaged = false; });
   }
+  /* 设计态占用：设备是否被「已保存的输送线路线」引用（节点绑定 / 段内吸附）。
+     与运行时互斥锁 d.engaged 不同——这里只读路线数据，不写任何状态机字段。
+     供初始待机动画判定：未被任何路线占用时才播放设备自身的循环动作。
+     每帧只算一次集合并按路线签名缓存 0.5s，避免逐设备逐帧全量扫描。 */
+  var _designedCache = { sig: '', ids: null, t: -1 };
+  function designedIdSet() {
+    var R = WAP.routes, routes = (R && R.routes) || [];
+    var sig = routes.map(function (r) { return r.id + ':' + ((r.nodes || []).length); }).join('|');
+    if (_designedCache.ids && _designedCache.sig === sig && E.t - _designedCache.t < 0.5)
+      return _designedCache.ids;
+    var set = {};
+    routes.forEach(function (r) {
+      var nodes = r.nodes || [];
+      nodes.forEach(function (n) {
+        if (n.kind === 'device' && n.targetId) set[n.targetId] = 1;
+        if (n.bind && n.bind.t === 'device' && n.bind.id) set[n.bind.id] = 1;
+      });
+      if (R.planSeq) (R.planSeq(nodes) || []).forEach(function (s) {
+        (s.devices || []).forEach(function (o) { set[o.id] = 1; });
+      });
+    });
+    _designedCache = { sig: sig, ids: set, t: E.t };
+    return set;
+  }
   /* 只改显示、不改功能：隐藏收发器后其绑定、吐货 / 收货逻辑完全保留 */
   function applyVisibility() {
     E.devices.forEach(function (d) {
@@ -2872,8 +3065,15 @@
   function equipTick(dt) {
     E.t += dt;
     var run = !!(WAP.sim && WAP.sim.playing);
+    var designedSet = designedIdSet();
     E.devices.forEach(function (d) {
-      if (d.anim && d.anim.step) d.anim.step(dt, run || !!d.engaged, E.t);
+      var engaged = !!d.engaged;              // 路线正在运行 / carrier 锁定
+      var designed = !!designedSet[d.id];     // 设计态：已被某条路线引用
+      /* 无路线连接、无设计占用的设备播「初始可衔接动画」；被设计路线占用的
+         设备静默（除非路线正在跑）。路线删除后 designed 变 false 自动恢复。 */
+      var idle = !engaged && !designed;
+      if (d.anim && d.anim.step) d.anim.step(dt, run || engaged || idle, E.t,
+        { idle: idle && !run, engaged: engaged, designed: designed });
     });
     /* 门在「仿真 / 路线运行 / 货物静止」时都检测，不必依赖 sim.playing */
     tickGates(dt, cargoPoints());
@@ -2883,6 +3083,7 @@
     rebuildDevices();
     syncLiftDevices();
     relocateLiftMarkers();   // 库体尺寸变化后，接驳标记紧跟塔位、不占无关格
+    if (reanchorLineDevices()) { rebuildGrid(); positionAll(); save(); } // 外部输送线跟随各自提升机接驳位
     ensureValidCells();
     drawCellPick();           // 单货架选区随网格一起重定位
     if (E.selected) { updateMark(); updateDevPanel(); }
@@ -2897,7 +3098,7 @@
       /* 需求：设备目录只显示设备名称，不出现小字描述（说明放在 title 里） */
       box.innerHTML = ORDER.map(function (k) {
         var t = TYPES[k];
-        return '<button type="button" class="eq-cat" data-type="' + k + '" title="' + esc(t.n) + '">' +
+        return '<button type="button" class="eq-cat" data-type="' + k + '" draggable="true" title="拖到画布摆放，或点击自动放置">' +
           '<span class="eq-cat-t"><b>' + esc(t.n) + '</b></span>' +
           '<em>' + t.code + '</em></button>';
       }).join('');
@@ -2935,12 +3136,95 @@
     if (ovCnt) ovCnt.textContent = E.devices.length + ' 台';
   }
 
+  /* ---------------- 货架结构手套：移动 / 删除主通道 ---------------- */
+  var gloveSel = 0;      // 当前选中的主通道索引（0..aisles-1）
+  function gloveSync() {
+    var ui = $('gloveUI'); if (!ui) return;
+    var c = cfg();
+    gloveSel = WAP.core.clampInt(gloveSel, 0, Math.max(0, (c.aisles || 1) - 1));
+    var label = $('gloveAisle');
+    if (label) label.textContent = '第 ' + (gloveSel + 1) + ' 条 / 共 ' + (c.aisles || 1) + ' 条';
+    var del = $('gloveDel');
+    if (del) del.disabled = (c.aisles || 1) <= 1;
+    var l = $('gloveLeft'), r = $('gloveRight');
+    /* 左移：左侧储区减 1（需≥2）；右移：右侧储区减 1（需≥2） */
+    if (l) l.disabled = (c.depths[gloveSel] || 1) < 2;
+    if (r) r.disabled = (c.depths[gloveSel + 1] || 1) < 2;
+  }
+  function gloveSet(on) {
+    var ui = $('gloveUI'), btn = $('eqGloveBtn');
+    if (ui) ui.hidden = !on;
+    if (btn) { btn.classList.toggle('is-on', on); btn.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+    if (on) gloveSync();
+  }
+  function gloveMove(dir) {
+    var c = cfg();
+    if (WAP.core.moveAisle(c, gloveSel, dir)) {
+      WAP.core.save(c);
+      WAP.app.commit();
+      gloveSync();
+      toast('主通道已向' + (dir < 0 ? '左' : '右') + '移动一格 · 原位置变为储区');
+    } else toast('该方向已到边界（储区最小 1 格）');
+  }
+  function gloveSwitch(delta) {
+    var c = cfg();
+    gloveSel = ((gloveSel + delta) % c.aisles + c.aisles) % c.aisles;
+    gloveSync();
+  }
+  function gloveDelete() {
+    var c = cfg();
+    if ((c.aisles || 1) <= 1) { toast('至少保留一条主通道'); return; }
+    if (!global.confirm('确定删除第 ' + (gloveSel + 1) + ' 条主通道吗？\n它左右两侧的储区将合并，原通道位置变为储区结构。')) return;
+    if (WAP.core.removeAisle(c, gloveSel)) {
+      WAP.core.save(c);
+      WAP.app.commit();
+      gloveSel = WAP.core.clampInt(gloveSel, 0, c.aisles - 1);
+      gloveSync();
+      toast('主通道已删除 · 左右储区已合并');
+    }
+  }
+
   function bindPanel() {
     var cat = $('equipCatalog');
-    if (cat) cat.addEventListener('click', function (e) {
-      var b = e.target.closest('[data-type]');
-      if (b) add(b.dataset.type);
+    var lastDrop = 0;   // 拖放后短时间内抑制 click，避免重复添加
+    if (cat) {
+      cat.addEventListener('click', function (e) {
+        if (Date.now() - lastDrop < 400) return;
+        var b = e.target.closest('[data-type]');
+        if (b) add(b.dataset.type);
+      });
+      /* HTML5 拖放（桌面） */
+      cat.addEventListener('dragstart', function (e) {
+        var b = e.target.closest('[data-type]'); if (!b) return;
+        e.dataTransfer.setData('text/wap-eq', b.dataset.type);
+        e.dataTransfer.effectAllowed = 'copy';
+      });
+      /* 触屏拖拽：pointerdown on 目录项 → pointerup 在画布则落点摆放 */
+      cat.addEventListener('pointerdown', function (e) {
+        if (e.pointerType === 'mouse') return;
+        var b = e.target.closest('[data-type]'); if (!b) return;
+        E.catDrag = { type: b.dataset.type, id: e.pointerId };
+      });
+    }
+    if (E.canvas) {
+      E.canvas.addEventListener('dragover', function (e) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+      E.canvas.addEventListener('drop', function (e) {
+        e.preventDefault();
+        var type = e.dataTransfer.getData('text/wap-eq');
+        if (TYPES[type]) { lastDrop = Date.now(); dropDevice(type, e); }
+      });
+    }
+    /* 货架结构手套 */
+    if ($('eqGloveBtn')) $('eqGloveBtn').addEventListener('click', function () {
+      gloveSet($('gloveUI') && $('gloveUI').hidden);
     });
+    if ($('gloveClose')) $('gloveClose').addEventListener('click', function () { gloveSet(false); });
+    if ($('gloveLeft')) $('gloveLeft').addEventListener('click', function () { gloveMove(-1); });
+    if ($('gloveRight')) $('gloveRight').addEventListener('click', function () { gloveMove(1); });
+    if ($('glovePrev')) $('glovePrev').addEventListener('click', function () { gloveSwitch(-1); });
+    if ($('gloveNext')) $('gloveNext').addEventListener('click', function () { gloveSwitch(1); });
+    if ($('gloveDel')) $('gloveDel').addEventListener('click', gloveDelete);
+
     var list = $('equipList');
     if (list) list.addEventListener('click', function (e) {
       var f = e.target.closest('[data-focus]');
@@ -3033,13 +3317,28 @@
     if ($('dpGateGreen')) $('dpGateGreen').addEventListener('click', function () { setGateColor(null, 'green'); });
     if ($('btnEquip')) $('btnEquip').addEventListener('click', function () { WAP.ctx.nav('equip'); });
     if ($('equipClear')) $('equipClear').addEventListener('click', function () {
+      var lifts = E.devices.filter(function (d) { return d.type === 'lift'; }).length;
       if (!E.devices.length) { toast('当前没有设备'); return; }
-      E.devices.filter(function (d) { return d.type !== 'lift'; }).map(function (d) { return d.id; }).forEach(remove);
-      toast('已清空外置设备（提升机需逐台删除）');
+      if (lifts) {
+        E.devices.filter(function (d) { return d.type !== 'lift'; }).map(function (d) { return d.id; }).forEach(remove);
+        toast('已清空外置设备（提升机需逐台删除）');
+      } else {
+        clearDevices(false);
+        toast('已清空全部设备');
+      }
     });
   }
   function bindGlobal() {
     global.addEventListener('pointermove', onMove);
+    /* 触屏：从设备面板目录拖出 → 落在画布上摆放 */
+    global.addEventListener('pointerup', function (e) {
+      var drag = E.catDrag;
+      E.catDrag = null;
+      if (!drag || drag.id !== e.pointerId) return;
+      var r = E.canvas.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+      dropDevice(drag.type, e);
+    });
     global.addEventListener('pointerup', onUp);
     global.addEventListener('pointercancel', onUp);
     global.addEventListener('blur', cancelDrag);
@@ -3132,7 +3431,9 @@
   }
 
   WAP.equipment = {
-    init: init, add: add, remove: remove, select: select, selectLift: selectLift,
+    init: init, add: add, remove: remove, clearDevices: clearDevices,
+    load: load, save: save,
+    select: select, selectLift: selectLift,
     deselect: deselect, edit: edit, focus: focus, rotate: rotate, stepLevel: stepLevel,
     placeOnCell: placeOnCell, onRebuild: onRebuild,
     setLiftLevels: setLiftLevels, setLiftBoost: setLiftBoost, matchConveyor: matchConveyor,

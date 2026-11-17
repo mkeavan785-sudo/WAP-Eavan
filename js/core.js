@@ -29,17 +29,24 @@
   var CARGO_NAME = {};
   CARGO_KINDS.forEach(function (o) { CARGO_NAME[o.k] = o.n; });
 
-  /* 货物「大类」：按托盘组合区分（与上面的货物外观种类正交）。
-     single 无托盘单货物＝单件货物直接落在货位梁面、不带托盘；
-     combo 子母托盘＝货物下叠两块（上棕子托盘 / 下银母托盘）；
-     sub 光子托盘＝无货物、仅棕色子托盘；mother 光母托盘＝无货物、仅银色母托盘。 */
+  /* 货物「大类」：按「是否带货 + 是否带子托盘 + 是否带母托盘」组合区分，
+     与货物外观种类（纸箱/金属/麻布…）正交。共 7 类：
+     goods 仅货物 / goodsSub 货物+子托 / goodsCombo 货物+子托+母托 /
+     sub 子托 / mother 母托 / subMother 子托+母托 / empty 空（不显示）。
+     旧存档 key 别名：single→goods、combo→goodsCombo。 */
   var CARGO_CLASSES = [
-    { k: 'single', n: '无托盘单货物', d: '单件货物 · 不带托盘', sw: '#7b8ba3' },
-    { k: 'combo',  n: '子母托盘',   d: '货物 + 上棕子托盘 + 下银母托盘', sw: '#b0803f' },
-    { k: 'sub',    n: '光子托盘',   d: '无货物 · 仅棕色子托盘', sw: '#a9763c' },
-    { k: 'mother', n: '光母托盘',   d: '无货物 · 仅银色母托盘', sw: '#c8d2dc' }
+    { k: 'goods',      n: '货物',             d: '单件货物 · 不带托盘',            sw: '#7b8ba3', goods: 1, sub: 0, mother: 0 },
+    { k: 'goodsSub',   n: '货物+子托盘',       d: '货物 + 棕色子托盘',              sw: '#a9824a', goods: 1, sub: 1, mother: 0 },
+    { k: 'goodsCombo', n: '货物+子托盘+母托盘', d: '货物 + 子托盘 + 银色母托盘',      sw: '#b0803f', goods: 1, sub: 1, mother: 1 },
+    { k: 'sub',        n: '子托盘',           d: '无货物 · 仅棕色子托盘',          sw: '#a9763c', goods: 0, sub: 1, mother: 0 },
+    { k: 'mother',     n: '母托盘',           d: '无货物 · 仅银色母托盘',          sw: '#c8d2dc', goods: 0, sub: 0, mother: 1 },
+    { k: 'subMother',  n: '子托盘+母托盘',     d: '无货物 · 子托盘叠在母托盘上',      sw: '#b9a98c', goods: 0, sub: 1, mother: 1 },
+    { k: 'empty',      n: '空',               d: '空货位 · 不显示任何货物或托盘',   sw: '#e3e8ef', goods: 0, sub: 0, mother: 0 }
   ];
+  var CARGO_CLASS_ALIAS = { single: 'goods', combo: 'goodsCombo' };
   var CARGO_CLASS_KEYS = CARGO_CLASSES.map(function (o) { return o.k; });
+  var CARGO_CLASS_DEF = {};
+  CARGO_CLASSES.forEach(function (o) { CARGO_CLASS_DEF[o.k] = o; });
   var CARGO_CLASS_NAME = {};
   CARGO_CLASSES.forEach(function (o) { CARGO_CLASS_NAME[o.k] = o.n; });
 
@@ -47,7 +54,7 @@
   var DEFAULT = {
     name: '四向库 A 区',
     cargoType: 'mix',        // 货位货物种类（见 CARGO_KINDS）
-    cargoClass: 'single',    // 货物大类（见 CARGO_CLASSES）：无托盘单货物 / 子母托盘 / 光子托盘 / 光母托盘
+    cargoClass: 'goods',     // 货物大类（见 CARGO_CLASSES）：7 种货物/托盘组合
     shuttleColor: 'blue',    // 四向车默认车身色（结构贴图不变，只换主色）
     aisles: 2,               // 主巷道（主轨道）数 1-4
     bayGroups: [6, 6],       // BAY 分段；段与段之间留横向通道
@@ -66,6 +73,11 @@
     loadMM: 770,             // 货高（含栈板）mm
     kg: 800,                 // 单板载重 kg
     fill: 52,                // 初始在库率 %（按存放优先级整齐排布，避免塞满、挡住行车路线）
+    cargoCount: -1,          // 货物总数：-1=沿用 fill 百分比；≥0=按件数分布
+    cargoRandom: false,      // 随机分布开关（固定 seed，重建稳定）
+    cargoReserve: 1,         // 随机分布时每条子通道至少预留空格数（保证四向车可通行）
+    cargoSeed: 20261117,     // 随机分布固定种子
+    cargoMainClear: true,    // 主通道相邻格必空（硬性行车通道）
     split: 3,                // 下层纸箱层数（视觉区分）
     liftN: 4,                // 提升机台数：均匀分布于前端子通道口，非每条子通道一台
     liftCols: null,          // 设备面板维护的提升机布局：{id,i}[], i=BAY 列；null=均匀分配
@@ -76,8 +88,8 @@
     netH: 'full',            // 网高：full / 3m
     vE: 256,                 // 空载速度 cm/s
     vL: 160,                 // 负载速度 cm/s
-    physicsMode: false,      // 物理规则仿真：质量插值加减速 / 换向 2s / 顶升 2s / 防撞避让 / 超载拒载
-    simPreset: 'demo',       // 参数档：demo 演示快节奏 / real 真实 FWS-H150 厂家参数
+    physicsMode: true,       // 物理规则仿真：默认开启真实物理（质量插值/换向/顶升/避让/超载）
+    simPreset: 'real',       // 参数档：默认 real 真实 FWS-H150 厂家参数（demo 为快节奏演示对比档）
     lowR: [1, 3],            // 下层（固定层）范围
     lowN: 3,                 // 下层穿梭车台数
     highR: [4, 6],           // 上层（跨层）范围，null＝不设
@@ -218,27 +230,44 @@
     c.y0 = clamp(Number(c.y0) || 1, 0.1, 2);
     c.pitch = clamp(Number(c.pitch) || 1.25, 0.8, 3);
     c.fill = clamp(Number(c.fill) || 0, 0, 100);
+    /* 货物总数控制：-1 沿用 fill%；随机分布预留通道 */
+    /* 注意 clampInt 用 `Number(v)||a`，会把合法的 0 变下界 -1，故此处直接夹取 */
+    c.cargoCount = c.cargoCount == null ? -1
+      : Math.max(-1, Math.min(100000, Math.round(Number(c.cargoCount) || 0)));
+    c.cargoRandom = !!c.cargoRandom;
+    c.cargoReserve = clampInt(c.cargoReserve == null ? 1 : c.cargoReserve, 0, 3);
+    c.cargoSeed = clampInt(c.cargoSeed == null ? 20261117 : c.cargoSeed, 1, 999999999);
+    c.cargoMainClear = c.cargoMainClear !== false;
     /* 新版拓扑：提升机按子通道口均匀分配；四向车按层固定配置 */
     c.liftN = clampInt(c.liftN == null ? 4 : c.liftN, 1, 8);
     c.perLevel = clampInt(c.perLevel == null ? 1 : c.perLevel, 1, 3);
     /* 提升机布局由「设备面板」维护：liftCols 为 {id,i} 数组，i = 对接的 BAY 列。
        为 null 时按 liftN 均匀分配（既有默认行为，保证仿真回归一致）。
        liftCfg 按稳定 id 记录每台提升机的层数 / 加高 / 是否已匹配层间输送线。 */
+    /* 提升机布局：i 越界时【夹取到合法列】而不是整表作废。
+       旧逻辑一旦某台 i>=bays（缩短货架）就把 liftCols 全清成 null，
+       提升机按 liftN 均匀重排 → 塔位瞬跳、外部输送线随之错位/不对齐。
+       夹取后保留稳定 id 与列顺序；重复列顺延到最近空列；不足时从空列补足。 */
     if (Array.isArray(c.liftCols) && c.liftCols.length && c.liftCols.length <= 8 &&
         c.liftCols.length === c.liftN &&
-        c.liftCols.every(function (o) {
-          return o && /^LF-\d+$/.test(o.id) && typeof o.i === 'number' &&
-            Math.round(o.i) === o.i && o.i >= 0 && o.i < c.bays;
-        }) &&
-        c.liftCols.map(function (o) { return o.i; }).filter(function (v, k, a) { return a.indexOf(v) === k; }).length === c.liftCols.length) {
-      c.liftCols = c.liftCols.map(function (o) { return { id: o.id, i: o.i }; });
+        c.liftCols.every(function (o) { return o && /^LF-\d+$/.test(o.id) && typeof o.i === 'number' && Math.round(o.i) === o.i; })) {
+      var usedCols = {}, fixedCols = [];
+      c.liftCols.forEach(function (o) {
+        var i = clampInt(o.i, 0, Math.max(0, c.bays - 1));
+        while (usedCols[i] && i < c.bays - 1) i++;
+        while (usedCols[i] && i > 0) i--;
+        usedCols[i] = 1; fixedCols.push({ id: o.id, i: i });
+      });
+      if (fixedCols.length === c.liftN) c.liftCols = fixedCols;
+      else c.liftCols = null;
     } else {
       c.liftCols = null;
     }
     if (!c.liftCfg || typeof c.liftCfg !== 'object' || Array.isArray(c.liftCfg)) c.liftCfg = {};
     delete c.lifts;                       // 旧版「每巷道两端/一端」参数已废弃
     if (CARGO_KEYS.indexOf(c.cargoType) < 0) c.cargoType = 'mix';
-    if (CARGO_CLASS_KEYS.indexOf(c.cargoClass) < 0) c.cargoClass = 'single';
+    if (CARGO_CLASS_ALIAS[c.cargoClass]) c.cargoClass = CARGO_CLASS_ALIAS[c.cargoClass];  // 旧存档别名
+    if (CARGO_CLASS_KEYS.indexOf(c.cargoClass) < 0) c.cargoClass = 'goods';
     if (SH_TINTS.indexOf(c.shuttleColor) < 0) c.shuttleColor = 'blue';
     c.split = clampInt(c.split, 0, c.levels);
     c.loadMM = clamp(Number(c.loadMM) || 770, 300, 2500);
@@ -300,6 +329,11 @@
     if (backMain) return k / last;                  // 主通道在 +Z，最里面是 k=0
     if (frontMain) return (D - 1 - k) / last;      // 主通道在 -Z，最里面是 k=D-1
     return k / last;
+  }
+  /* 是否紧邻主通道的货位（硬性预留为空，作为四向车进出子通道的接驳位） */
+  function mainAdjacent(c, b, k) {
+    var D = (c.depths && c.depths[b]) || 1;
+    return (b > 0 && k === 0) || (b < c.aisles && k === D - 1);
   }
 
   /* 核心几何 —— 按实际四向库拓扑重建：
@@ -425,18 +459,61 @@
             var rank = storageRank(c, b, k);
             var jitter = (hash(l * 31.7 + ii * 7.3 + b * 13.1) - 0.5) * 0.045;
             var clear = Object.prototype.hasOwnProperty.call(corridor, id);
-            var occ = conv < 0 && !isChg && !clear && rank < (c.fill / 100 + jitter);
+            /* occ 在循环后统一分配（两阶段）：便于按「货物总数」或随机分布
+               精确选位、并硬性预留主通道 / 每子通道通行位，避免堵死路线。 */
             cells.push({
               id: id, l: l, i: ii, b: b, k: k, wall: false, conv: conv, rank: rank,
+              jitter: jitter, clear: clear,
               x: cx, y: y, z: bk[0] + (k + 0.5) * dp,
-              chg: isChg, occ: Object.prototype.hasOwnProperty.call(overrides, id) && conv < 0 && !isChg && !clear
-                ? !!overrides[id] : occ
+              chg: isChg, occ: false
             });
             seed++;
           }
         });
       });
     }
+
+    /* ---- 货物分布两阶段分配 ----
+       候选 = 非提升机输送线位 / 非充电位 / 非提升机通道列；
+       默认按 rank 整齐排布（旧行为）；随机分布用固定 seed 打乱，且
+       ①主通道相邻格必空 ②每条子通道(层×列×储区)至少留 cargoReserve 个空格，
+       保证四向车始终有可通行的接驳位与行车路线。 */
+    var eligible = cells.filter(function (o) {
+      if (o.chg || o.conv >= 0 || o.clear) return false;
+      if (c.cargoMainClear && mainAdjacent(c, o.b, o.k)) return false;
+      return true;
+    });
+    var capacity = eligible.length;                 // 真实可放货位数（UI 上限）
+    function randKey(o) {
+      return hash(c.cargoSeed + o.l * 131 + o.i * 17 + o.b * 7.3 + o.k * 1.7 + 0.31);
+    }
+    if (c.cargoRandom) {
+      /* 每条子通道至少留 N 空：按随机序保留前 (len-N) 个作为可放候选，
+         其余强制留空；这样任意子通道都不会被完全堵死。 */
+      var bySub = {}, kept = [];
+      eligible.forEach(function (o) {
+        var key = o.l + '|' + o.i + '|' + o.b;
+        (bySub[key] || (bySub[key] = [])).push(o);
+      });
+      Object.keys(bySub).forEach(function (key) {
+        var arr = bySub[key].slice().sort(function (x, y) { return randKey(x) - randKey(y); });
+        kept = kept.concat(arr.slice(0, Math.max(0, arr.length - c.cargoReserve)));
+      });
+      eligible = kept;
+    }
+    eligible.sort(function (x, y) {
+      var kx = c.cargoRandom ? randKey(x) : (x.rank + x.jitter);
+      var ky = c.cargoRandom ? randKey(y) : (y.rank + y.jitter);
+      return kx - ky || (x.id < y.id ? -1 : (x.id > y.id ? 1 : 0));
+    });
+    var target = c.cargoCount >= 0 ? c.cargoCount : Math.round(capacity * c.fill / 100);
+    target = clampInt(target, 0, eligible.length);
+    for (var qi = 0; qi < target; qi++) eligible[qi].occ = true;
+    /* 单货位覆盖优先（用户手工指定），但输送线/通道位仍禁止放货 */
+    cells.forEach(function (o) {
+      if (Object.prototype.hasOwnProperty.call(overrides, o.id) &&
+          o.conv < 0 && !o.chg && !o.clear) o.occ = !!overrides[o.id];
+    });
 
     var slotCount = cells.filter(function (o) { return !o.chg && o.conv < 0; }).length;
     var used = cells.filter(function (o) { return !o.chg && o.conv < 0 && o.occ; }).length;
@@ -448,7 +525,8 @@
       stations: stations, cells: cells, loadH: loadH, chgLevels: chgLevels,
       chgBay: chgBay, liftCols: liftCols, liftSites: liftSites, convCell: convCell,
       convFrom: convFrom, convTo: convTo, convMain: mainZ,
-      lifts: liftSites.length, slots: slotCount, used: used, shuttles: shuttles,
+      lifts: liftSites.length, slots: slotCount, capacity: capacity,
+      used: used, shuttles: shuttles,
       lw: gw, dw: dp, ch: c.pitch
     };
   }
@@ -503,6 +581,37 @@
     c.depths = fixDepths(c);
     return normalize(c);
   }
+  /* 货架结构手套：水平移动一条主通道（沿 Z），仅改储区分段，不增删通道。
+     depths = [左储区, 中储区, 右储区]，主通道夹在相邻储区之间。
+     aisleIndex=0 表示 depths[0] 与 depths[1] 之间那条主通道；
+     dir=-1 把通道向 -Z（左）移一格 → 左储区 -1、中储区 +1（原通道位变子通道）；
+     dir=+1 反之。单储区最小 1 格，越界则拒绝。 */
+  function moveAisle(c, aisleIndex, dir) {
+    var ai = clampInt(aisleIndex, 0, (c.aisles || 1) - 1);
+    var d = fixDepths(c);
+    var left = ai, right = ai + 1;
+    if (right >= d.length) return false;
+    /* 通道向 +Z（右）移一格：原通道位变左储区 → 左 +1；右侧被占一格 → 右 -1。
+       向 -Z（左）移：左 -1、右 +1。总量守恒，单储区不得小于 1。 */
+    var dl = dir > 0 ? 1 : -1;
+    if (d[left] + dl < 1 || d[right] - dl < 1) return false;
+    d[left] += dl; d[right] -= dl;
+    c.depths = d;
+    normalize(c);
+    return true;
+  }
+  /* 删除一条主通道：aisles-1，并把它左右两侧储区合并为一区（深度相加、上限 12）。
+     最少保留 1 条主通道。 */
+  function removeAisle(c, aisleIndex) {
+    if ((c.aisles || 1) <= 1) return false;
+    var ai = clampInt(aisleIndex, 0, c.aisles - 1);
+    var d = fixDepths(c);
+    var merged = Math.min(12, d[ai] + d[ai + 1]);
+    d.splice(ai, 2, merged);
+    c.depths = d; c.aisles -= 1;
+    normalize(c);
+    return true;
+  }
 
   /* 配置持久化 */
   function load() {
@@ -541,7 +650,8 @@
       var out = {};
       if (o && typeof o === 'object') {
         Object.keys(o).forEach(function (id) {
-          if (CARGO_CLASS_KEYS.indexOf(o[id]) >= 0 || o[id] === 'auto') out[id] = o[id];
+          var v = CARGO_CLASS_ALIAS[o[id]] || o[id];   // 旧存档别名归一
+          if (CARGO_CLASS_KEYS.indexOf(v) >= 0 || v === 'auto') out[id] = v;
         });
       }
       return out;
@@ -569,7 +679,9 @@
     AW: AW, CAW: CAW, DEFAULT: DEFAULT, STORE_KEY: STORE_KEY,
     CARGO_OV_KEY: CARGO_OV_KEY, CLASS_OV_KEY: CLASS_OV_KEY,
     CARGO_KINDS: CARGO_KINDS, CARGO_KEYS: CARGO_KEYS, CARGO_REAL: CARGO_REAL, CARGO_NAME: CARGO_NAME,
-    CARGO_CLASSES: CARGO_CLASSES, CARGO_CLASS_KEYS: CARGO_CLASS_KEYS, CARGO_CLASS_NAME: CARGO_CLASS_NAME,
+    CARGO_CLASSES: CARGO_CLASSES, CARGO_CLASS_KEYS: CARGO_CLASS_KEYS,
+    CARGO_CLASS_NAME: CARGO_CLASS_NAME, CARGO_CLASS_DEF: CARGO_CLASS_DEF,
+    CARGO_CLASS_ALIAS: CARGO_CLASS_ALIAS,
     SH_TINTS: SH_TINTS, SHUTTLE_COLOR_KEY: SHUTTLE_COLOR_KEY,
     clone: clone, clamp: clamp, clampInt: clampInt, distribute: distribute,
     distributeWidth: distributeWidth,
@@ -577,6 +689,7 @@
     stats: stats, cellId: cellId, hash: hash, storageRank: storageRank,
     autoCellPitch: autoCellPitch, setCellPitch: setCellPitch,
     setLen: setLen, setWid: setWid, setHei: setHei, addAisle: addAisle,
+    moveAisle: moveAisle, removeAisle: removeAisle,
     load: load, save: save,
     loadCargoOverrides: loadCargoOverrides, saveCargoOverrides: saveCargoOverrides,
     loadCargoClassOverrides: loadCargoClassOverrides, saveCargoClassOverrides: saveCargoClassOverrides,

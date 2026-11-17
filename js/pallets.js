@@ -169,14 +169,18 @@
   function onArrive(rec) {
     var dev = rec.targetId ? (eq().devices || []).filter(function (d) { return d.id === rec.targetId; })[0] : null;
     if (!dev || dev.type !== 'destacker') { rec.phase = 'idle'; return; }
-    if (rec.cls !== 'mother') {
-      /* 只收集母托盘：子托盘 / 带货物一律拒收 */
+    var def = WAP.core.CARGO_CLASS_DEF[rec.cls] || WAP.core.CARGO_CLASS_DEF[rec.cls === 'single' ? 'goods' : (rec.cls === 'combo' ? 'goodsCombo' : 'goods')];
+    if (!(def.mother && !def.goods)) {
+      /* 只收「无货且含母托盘」的组合（mother / subMother）：
+         纯子托盘 / 带货物的类一律拒收 */
       P.rejected++;
       rec.phase = 'idle';
       rec.path = [];
-      rec.note = '子托盘 · 拆叠盘机只收母托盘';
+      rec.note = '非纯母托盘 · 拆叠盘机只收母托盘';
       return;
     }
+    /* 统一按「母托盘」入垛；subMother 的子托盘随垛一并处理（视觉上叠在母托上） */
+    rec.cls = 'mother';
     var n = stackOf(dev.id) + 1;
     setStack(dev.id, n);
     P.received++;

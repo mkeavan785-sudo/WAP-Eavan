@@ -55,6 +55,11 @@
         <button type="button" data-dev="tablet" aria-pressed="false" title="平板模式：画布全幅 + 右侧抽屉面板">平板</button>
         <button type="button" data-dev="phone" aria-pressed="false" title="手机模式：底部面板 + 触控手势">手机</button>
       </div>
+      <span class="tsep"></span>
+      <button type="button" class="tbtn tbtn-icon" id="btnCopyAll" title="复制整库（保存当前库体+设备+路线）" aria-label="复制整库">⧉</button>
+      <button type="button" class="tbtn tbtn-icon" id="btnPasteAll" title="粘贴整库（恢复上次复制的库）" aria-label="粘贴整库">📋</button>
+      <button type="button" class="tbtn tbtn-icon tbtn-danger-ghost" id="btnDelAll" title="删除整库（恢复默认空库）" aria-label="删除整库">✕</button>
+      <button type="button" class="tbtn tbtn-icon tbtn-danger-ghost" id="btnClearScene" title="清空场景（可勾选删除项，带确认）" aria-label="清空场景">⌫</button>
       <button type="button" class="tbtn tbtn-icon" id="btnFull" title="全屏" aria-label="全屏">⛶</button>
     </div>
   </header>
@@ -353,6 +358,19 @@
         <button type="button" class="vm-btn" id="btnFit" title="适应视图">⛶<span>适应</span></button>
       </div>
 
+      <!-- 物理 HUD：实时速度/载重/状态，让物理规则肉眼可见（仅物理开启时显示） -->
+      <div class="phys-hud" id="physHud" aria-label="物理仿真实时状态" hidden>
+        <div class="ph-hd"><span>⚗ 物理仿真</span><b id="phPreset">真实 FWS-H150</b></div>
+        <div class="ph-rows" id="phRows"></div>
+        <div class="ph-foot" id="phFoot">—</div>
+      </div>
+
+      <!-- 整库操作：仅晶格网显示时凸显，平时隐藏 -->
+      <div class="rack-bulk" id="rackBulk" role="group" aria-label="整库操作">
+        <button type="button" class="rb-btn" id="btnRackCopy" title="复制整库配置（含库体/设备/路线，存入剪贴板）">⧉<span>复制整库</span></button>
+        <button type="button" class="rb-btn rb-danger" id="btnRackDelete" title="删除整库（需确认）">✕<span>删除整库</span></button>
+      </div>
+
       <!-- 平板 / 手机模式：打开抽屉 / 底部面板的悬浮按钮（电脑模式隐藏） -->
       <button type="button" class="sheet-fab" id="sheetFab" aria-label="打开控制面板">
         <span class="fab-ico">☰</span><span class="fab-t">面板</span>
@@ -384,18 +402,18 @@
             <span class="sim-loop-tip" id="simLoopTip">默认货物到终点后静止；开启后原路返回</span>
           </div>
           <div class="sim-loop">
-            <button type="button" class="sim-btn sim-loop-btn" id="btnPhys" aria-pressed="false">⚗ 物理规则仿真：关</button>
-            <span class="sim-loop-tip" id="physTip">关闭中（与原行为一致）；开启后按当前参数档计算质量、换向、避让与拒载</span>
+            <button type="button" class="sim-btn sim-loop-btn is-on" id="btnPhys" aria-pressed="true">⚗ 物理规则仿真：开</button>
+            <span class="sim-loop-tip" id="physTip">已开启真实物理：车身上方状态牌实时显示载重/速度/状态；关闭可回到快节奏演示</span>
           </div>
           <div class="sim-seg" id="simPreset" role="group" aria-label="运动参数档">
             <span>参数档</span>
-            <button type="button" data-preset="demo" class="is-on">演示</button>
-            <button type="button" data-preset="real">真实 FWS-H150</button>
+            <button type="button" data-preset="demo">演示</button>
+            <button type="button" data-preset="real" class="is-on">真实 FWS-H150</button>
           </div>
           <div class="sim-tpl">
             <button type="button" class="sim-btn sim-tpl-btn" id="simTemplate">＋ 一键添加 / 识别输送线</button>
             <span class="sim-tpl-state" id="simTemplateState">尚未识别输送线路模板</span>
-            <p class="sim-tpl-tip">已搭好线路时直接<b>识别为模板</b>（不改动其它设备）；空场景则按「提升机正面口 → 3 台辊道 → 转弯位<b>移载机</b> → 转向后辊道」搭建，拆叠盘机只做空托盘工位、不参与转向。生成<b>入库 / 出库</b>两条路线，仿真严格<b>依据路线</b>并由真实四向车 / 提升机 / 输送设备承载货物；后续改动布局以后续布局为准。</p>
+            <p class="sim-tpl-tip">已搭好线路时直接<b>识别为模板</b>（不改动其它设备）；空场景则搭建<b>全结构示范线</b>：提升机正面口 → 辊道 → <b>链条机</b> → 辊道(套<b>外形检测门</b>) → 转弯位<b>移载机</b> → 转向后辊道 → <b>拆叠盘机</b>，并摆放 <b>AGV / 人 / 叉车 / 卡车</b> 作气氛（拆叠盘机只做空托盘工位、不参与转向）。生成<b>入库 / 出库</b>两条路线，仿真严格<b>依据路线</b>并由真实四向车 / 提升机 / 输送设备承载货物；后续改动布局以后续布局为准。</p>
           </div>
           <div class="sim-seg" id="simSpeed" role="group" aria-label="仿真倍速">
             <span>倍速</span>
@@ -490,6 +508,15 @@
           <div class="cargo-grid" id="cargoGrid" role="group" aria-label="货位货物种类"></div>
           <div class="cargo-class-t">货物大类 <em id="cargoClassPill">无托盘单货物</em></div>
           <div class="cargo-class-grid" id="cargoClassGrid" role="group" aria-label="货物大类"></div>
+          <div class="cargo-count-box" id="cargoCountBox">
+            <div class="cc-hd"><span>货物总数</span><b><em id="valCargoCount">—</em> <i>/</i> <span id="capCargoCount">—</span> 位</b></div>
+            <input type="range" id="rngCargoCount" min="0" max="1" step="1" value="0" aria-label="货物总数（0 到货位总数）">
+            <div class="cc-ops">
+              <label class="cc-chk"><input type="checkbox" id="chkCargoRandom"> 随机分布</label>
+              <label class="cc-res">每子通道留空 <input type="number" id="numCargoReserve" min="0" max="3" step="1" value="1"></label>
+            </div>
+            <p class="cc-tip">随机分布会预留空白货位作四向车路线，不堵死通道。</p>
+          </div>
           <div class="cargo-dist" id="cargoDist" aria-label="货物分布"></div>
           <div class="cargo-foot">
             <span id="cargoSummary">正在统计在库货物…</span>
@@ -544,6 +571,15 @@
             <div class="ov-cell"><span>主通道 / 储区</span><b id="ovAisles">—</b></div>
             <div class="ov-cell"><span>层间输送线接驳</span><b id="ovConv">—</b></div>
           </div>
+
+          <div class="ov-sec-t">货架结构件（实时 · 按货位结构组成）</div>
+          <div class="ov-grid">
+            <div class="ov-cell"><span>立柱（上下立柱）</span><b id="ovUpright">—</b></div>
+            <div class="ov-cell"><span>横梁（前后梁）</span><b id="ovBeam">—</b></div>
+            <div class="ov-cell"><span>子轨（sub-rail）</span><b id="ovSubRail">—</b></div>
+            <div class="ov-cell"><span>主轨（main-rail）</span><b id="ovMainRail">—</b></div>
+            <div class="ov-cell"><span>换向轨（reversing-rail）</span><b id="ovRevRail">—</b></div>
+          </div>
           <details class="ov-fold" id="ovDevFold">
             <summary><span>已摆放设备</span><em id="ovDevCount">0 台</em><span class="chev">⌄</span></summary>
             <div class="eq-sec-t">设备列表 <em id="equipClear" class="eq-clear">清空</em></div>
@@ -589,8 +625,23 @@
             <div><h2>设备面板</h2><p class="card-sub">选中即在库体地面同高摆放，可编辑吸附</p></div>
             <span class="pill pill-eq" id="equipCount">0 台</span>
           </div>
-          <div class="eq-sec-t">全部设备 <em>点击摆放</em></div>
+          <div class="eq-sec-t">全部设备 <em>点击摆放 / 拖到画布</em></div>
           <div class="eq-catalog" id="equipCatalog"></div>
+          <!-- 货架结构手套：水平移动 / 删除主通道 -->
+          <div class="eq-sec-t">货架结构 <em>手套工具</em></div>
+          <button type="button" class="eq-glove-btn" id="eqGloveBtn" aria-pressed="false" title="开启手套：水平移动或删除货架主通道">🧤 货架结构手套</button>
+          <div class="glove-ui" id="gloveUI" hidden>
+            <div class="glove-hd">主通道 <span id="gloveAisle">第 1 条</span>
+              <button type="button" id="gloveClose" aria-label="收起手套">✕</button></div>
+            <div class="glove-tip">仅水平移动（沿货架纵深）。移动后原通道位置变为储区结构。</div>
+            <div class="glove-rows">
+              <button type="button" class="glove-nav" id="glovePrev" title="上一条主通道">‹</button>
+              <button type="button" class="glove-move" id="gloveLeft" title="主通道向左移一格">← 左移一格</button>
+              <button type="button" class="glove-move" id="gloveRight" title="主通道向右移一格">右移一格 →</button>
+              <button type="button" class="glove-nav" id="gloveNext" title="下一条主通道">›</button>
+            </div>
+            <button type="button" class="glove-del" id="gloveDel" title="删除当前主通道（需确认）">✕ 删除此主通道</button>
+          </div>
           <div class="eq-legend">
             <span><i class="lg-free"></i>空闲格子</span>
             <span><i class="lg-rec"></i>推荐接驳位</span>
@@ -666,6 +717,30 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<!-- 清空场景确认框（勾选要删除的项目） -->
+<div class="modal-mask" id="clearMask" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="clearTitle">
+    <div class="modal-hd"><span class="modal-ico">⌫</span><h3 id="clearTitle">清空场景</h3>
+      <button type="button" class="modal-x" id="clearCancelTop" aria-label="关闭">✕</button></div>
+    <p class="modal-desc">请选择要清除的内容（可多选）。勾选的项目将被删除，操作不可撤销。</p>
+    <div class="modal-opts">
+      <label class="modal-opt"><input type="checkbox" id="clrAnim" checked><span class="opt-box"></span>
+        <span class="opt-txt"><b>复位所有动画</b><em>停止仿真、归零路线运行与在途货物、复位设备动作</em></span></label>
+      <label class="modal-opt"><input type="checkbox" id="clrRoutes" checked><span class="opt-box"></span>
+        <span class="opt-txt"><b>删除输送线路线</b><em>移除全部已设计的路线、点位与路径</em></span></label>
+      <label class="modal-opt"><input type="checkbox" id="clrEquip" checked><span class="opt-box"></span>
+        <span class="opt-txt"><b>删除输送线设备</b><em>清空全部设备（含提升机 / 人物 / AGV 等占位）</em></span></label>
+      <label class="modal-opt"><input type="checkbox" id="clrLook"><span class="opt-box"></span>
+        <span class="opt-txt"><b>清除外观与货物覆盖</b><em>车身配色、货物大类等个性化设置恢复默认</em></span></label>
+    </div>
+    <div class="modal-warn" id="clearWarn">⚠ 此操作不可撤销，请确认已勾选正确的项目。</div>
+    <div class="modal-ft">
+      <button type="button" class="modal-btn" id="clearCancel">取消</button>
+      <button type="button" class="modal-btn modal-btn-danger" id="clearConfirm">确认删除</button>
+    </div>
+  </div>
+</div>
+
 <script src="vendor/three.min.js"></script>
 <script src="js/core.js"></script>
 <script src="js/physics.js"></script>
@@ -682,6 +757,8 @@
 <script src="js/carrier.js"></script>
 <script src="js/pallets.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/ambient.js"></script>
+<script src="js/sceneClear.js"></script>
 <script src="js/device.js"></script>
 <script src="js/app.js"></script>
 </body>

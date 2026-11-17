@@ -231,7 +231,7 @@
     var tf = t.fy != null ? t.fy : a.fy;
     var dx = tx - p.x, dz = tz - p.z, df = tf - a.fy;
     var d = Math.hypot(dx, dz);
-    /* 物理规则仿真（默认关）：载重质量插值 V/Ta + 轴向换向驻留 2s。
+    /* 物理规则仿真（默认开，real 档）：载重质量插值 V/Ta + 轴向换向驻留 2s。
        physics 关闭时 ph = null，下列分支与原实现逐帧一致。 */
     var ph = (WAP.physics && WAP.physics.enabled) ? WAP.physics.plan(a, d) : null;
     if (ph && WAP.physics.turnHold(a, t, dx, dz, d, dt)) return;

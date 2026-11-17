@@ -74,32 +74,38 @@
     save(m);
   }
 
+  /* 面板开合：触屏端抽屉展开时画布让位（CSS 把 viewport 收进对应边），
+     过渡结束后 resize + 强制重取景，模型不会被抽屉盖住。
+     面板默认收起——只有用户主动点 FAB / 顶栏控制按钮才展开，
+     点选模型只会在侧栏备好内容，不再自动弹出遮挡画面。 */
+  var sheetTimer = null;
+  function onSheetChanged() {
+    if (sheetTimer) global.clearTimeout(sheetTimer);
+    sheetTimer = global.setTimeout(function () {
+      if (WAP.scene && WAP.scene.resize) WAP.scene.resize();
+      if (WAP.scene && WAP.scene.growFit && WAP.state && WAP.state.geom && mode !== 'pc')
+        WAP.scene.growFit([WAP.state.geom.len, WAP.state.geom.top, WAP.state.geom.tot], true);
+      if (WAP.scene && WAP.scene.fit && WAP.state && WAP.state.geom && mode === 'pc')
+        WAP.scene.fit([WAP.state.geom.len, WAP.state.geom.top, WAP.state.geom.tot], true);
+    }, 300);
+  }
   function openSheet() {
     if (mode === 'pc') return;
     D.documentElement.classList.add('sheet-open');
+    onSheetChanged();
   }
-  function closeSheet() { D.documentElement.classList.remove('sheet-open'); }
+  function closeSheet() {
+    D.documentElement.classList.remove('sheet-open');
+    onSheetChanged();
+  }
   function toggleSheet() {
     if (mode === 'pc') return;
-    D.documentElement.classList.toggle('sheet-open');
+    if (D.documentElement.classList.contains('sheet-open')) closeSheet(); else openSheet();
   }
 
-  /* 控制面板（整体模型 / 设备 / 货位 / 上下文浮层）出现 → 自动展开抽屉。
-     只监听 hidden 属性变化，不挂钩任何业务函数，对既有代码零侵入。 */
-  function watchPanels() {
-    if (!global.MutationObserver) return;
-    var ids = ['sideDock', 'ctxPanel', 'devPanel', 'selCard'];
-    var obs = new global.MutationObserver(function () {
-      for (var i = 0; i < ids.length; i++) {
-        var el = D.getElementById(ids[i]);
-        if (el && !el.hidden) { openSheet(); return; }
-      }
-    });
-    ids.forEach(function (id) {
-      var el = D.getElementById(id);
-      if (el) obs.observe(el, { attributes: true, attributeFilter: ['hidden'] });
-    });
-  }
+  /* 旧版：面板 hidden 一变就自动展开，导致「点一下模型画面就被抽屉盖住」。
+     已废弃——改为由 FAB / 顶栏控制按钮主动触发 openSheet。 */
+  function watchPanels() { /* intentionally disabled */ }
 
   function bindChrome() {
     var seg = D.getElementById('deviceSeg');
@@ -111,6 +117,15 @@
     if (fab) fab.addEventListener('click', toggleSheet);
     var close = D.getElementById('sbSheetClose');
     if (close) close.addEventListener('click', closeSheet);
+    /* 顶栏主动控制按钮：触屏端展开抽屉让用户看到对应面板 */
+    ['btnEquip', 'btnRoutes', 'btnSim'].forEach(function (id) {
+      var b = D.getElementById(id);
+      if (b) b.addEventListener('click', function () { openSheet(); });
+    });
+    var nav = D.getElementById('sideNav');
+    if (nav) nav.addEventListener('click', function () { openSheet(); });
+    var navSum = D.querySelector('#navControl > summary');
+    if (navSum) navSum.addEventListener('click', function () { openSheet(); });
   }
 
   /* 触屏模式下拦截 iOS 页面级捏合（gesturestart/gesturechange），

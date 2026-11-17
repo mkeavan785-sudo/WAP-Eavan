@@ -153,6 +153,14 @@
   /* 生成绑定信息：设备记 id、货物记货位坐标层级、空格记格子 key + 相对偏移 */
   function makeBind(pos) {
     var g = geom(), eq = equipment();
+    /* 通用实体绑定：起/终/途经点选中的任意物体（提升机/车/货位/其它设备）
+       按稳定 id 记录，库体或设备变化后由 resolveBind 重新取当前位置。 */
+    if (pos.entity && pos.entity.id) {
+      return { t: 'entity', ek: pos.entity.ek, id: pos.entity.id,
+        y: pos.y, nx: g ? (pos.x - (g.x0 + g.x1) / 2) : pos.x,
+        nz: g ? (pos.z - (g.z0 + g.z1) / 2) : pos.z,
+        ox: 0, oz: 0 };
+    }
     if ((pos.kind === 'device' || pos.kind === 'emitter') && pos.targetId) {
       var dev = eq ? eq.devices.filter(function (d) { return d.id === pos.targetId; })[0] : null;
       return { t: 'device', id: pos.targetId,
@@ -642,6 +650,37 @@
       x: cell.x, y: cell.y, z: cell.z
     };
   }
+  /* 命中的子网格沿父链回溯到实体 id：提升机塔 / 库内四向车。
+     scene.pickPart 只返回 kind，这里补上稳定 id 供点位绑定使用。 */
+  function findLiftByObject(obj) {
+    var o = obj;
+    while (o) {
+      if (o.userData && (o.userData.liftId || o.userData.lift)) return o.userData.liftId || o.userData.lift;
+      o = o.parent;
+    }
+    /* 塔体 mesh 未打 id 时按命中点就近匹配提升机塔 */
+    var p = new T.Vector3();
+    if (obj.getWorldPosition) {
+      obj.getWorldPosition(p);
+      modelRoot().worldToLocal(p);
+      var s = nearestLift(p.x, p.z), bd = 1e9, hit = null;
+      (geom().liftSites || []).forEach(function (q) {
+        var d = Math.hypot(q.x - p.x, q.z - p.z);
+        if (d < bd) { bd = d; hit = q; }
+      });
+      if (hit && bd < 2.4) return hit.id;
+    }
+    return null;
+  }
+  function findAgentByObject(obj) {
+    var devs = (WAP.sim && WAP.sim.devices) || [];
+    for (var i = 0; i < devs.length; i++) {
+      var a = devs[i], o = obj;
+      while (o) { if (o === a.obj) return a; o = o.parent; }
+    }
+    return null;
+  }
+
   function pickPosition(e) {
     var S = WAP.scene.S, eq = equipment();
     S.modelRoot.updateMatrixWorld(true);
@@ -656,20 +695,34 @@
         eq.devices.forEach(function (o) { if (o.id === id) dev = o; });
         if (!dev) continue;
         return { kind: 'device', targetId: dev.id, label: dev.name,
+          entity: { ek: 'equipment', id: dev.id, type: dev.type },
           x: dev.x, y: dev.y + Math.min(dev.dims[1], CONVEY_Y), z: dev.z };
       }
     }
-    /* ② 货架 / 货物 / 库内模型：命中货位 → 与具体货物融合 */
+    /* ② 货架 / 货物 / 库内模型：命中货位 → 与具体货物融合
+       附加 entity：让起/终/途经点都能绑定到命中的任意实体（提升机 / 四向车 /
+       货位 / 货物等），不再被 bind* 强制改写成货物或空白网格。 */
     var part = WAP.scene.pickPart(R.v2.clone());
     if (part && part.hit) {
       var p = part.point.clone();
       modelRoot().worldToLocal(p);
       if (part.cellId && cargoCellAt(part.cellId)) {
-        return cargoPos(cargoCellAt(part.cellId), null);
+        var cp = cargoPos(cargoCellAt(part.cellId), null);
+        if (cp) cp.entity = { ek: 'cargo', id: part.cellId };
+        return cp;
       }
       var kind = (part.kind === 'cargo' || part.kind === 'cell') ? 'cargo' : 'rack';
+      var ent = null;
+      if (part.kind === 'lift') {
+        var lf = findLiftByObject(part.hit.object);
+        if (lf) ent = { ek: 'lift', id: lf.id || lf };
+      } else if (part.kind === 'shuttle' || part.kind === 'agent') {
+        var ag = findAgentByObject(part.hit.object);
+        if (ag) ent = { ek: 'shuttle', id: ag.id };
+      }
+      if (!ent && part.cellId) ent = { ek: 'cargo', id: part.cellId };
       return { kind: kind, targetId: part.cellId || null, label: part.cellId || ('库内' + part.kind),
-        x: p.x, y: Math.max(0.02, p.y), z: p.z };
+        entity: ent, x: p.x, y: Math.max(0.02, p.y), z: p.z };
     }
     /* ③ 空白网格 / 任意地面位置 */
     var plane = new T.Plane(new T.Vector3(0, 1, 0), -modelRoot().position.y);
@@ -682,6 +735,8 @@
     return null;
   }
   function bindStart(pos) {
+    /* 用户明确点选了任意实体（设备/提升机/车/货位）→ 原样保留，不被改写 */
+    if (pos && pos.entity && pos.entity.id) return pos;
     if (pos && pos.kind === 'cargo' && pos.cargoId) return pos;
     /* 发货器作为起点：从它发出的货物都沿本路线送到货架 / 终点 */
     if (pos && pos.kind === 'device' && pos.targetId) {
@@ -708,6 +763,7 @@
       x: pos ? pos.x : 0, y: pos ? pos.y : CONVEY_Y, z: pos ? pos.z : geom().z0 - 2 };
   }
   function bindVia(pos) {
+    if (pos && pos.entity && pos.entity.id) return pos;
     if (pos && pos.kind === 'device' && pos.targetId) return pos;
     /* 途经点与设备融合：吸附到附近最近的输送设备 */
     var best = null, bd = 1e9;
@@ -729,6 +785,8 @@
       x: pos.x, y: pos.y, z: pos.z };
   }
   function bindEnd(pos) {
+    /* 终点也可绑定任意实体（设备 / 提升机 / 货位 / 车），不再是只能选空白网格 */
+    if (pos && pos.entity && pos.entity.id) return pos;
     /* 终点＝空白网格，意味着最终要往这个目的地运 */
     return { kind: 'grid', label: '目的地', targetId: null,
       x: pos.x, y: pos.y, z: pos.z };
@@ -887,6 +945,36 @@
     var b = n.bind;
     if (!b) return null;
     var eq = equipment(), g = geom();
+    if (b.t === 'entity') {
+      /* 任意实体：设备 / 提升机 / 四向车 / 货位，按稳定 id 取当前位置 */
+      if (b.ek === 'equipment' || b.ek === 'device') {
+        var dev = eq ? eq.devices.filter(function (d) { return d.id === b.id; })[0] : null;
+        if (dev) return { x: dev.x, y: dev.y + Math.min(dev.dims[1], CONVEY_Y), z: dev.z };
+      }
+      if (b.ek === 'lift') {
+        var site = (g.liftSites || []).filter(function (s) { return s.id === b.id; })[0];
+        if (site) return { x: site.x, y: levelY(0), z: site.z };
+      }
+      if (b.ek === 'shuttle') {
+        var ag = ((WAP.sim && WAP.sim.devices) || []).filter(function (a) { return a.id === b.id; })[0];
+        if (ag && ag.obj) {
+          var wp = ag.obj.getWorldPosition(new T.Vector3());
+          modelRoot().worldToLocal(wp);
+          return { x: wp.x, y: wp.y + (ag.fy || 0), z: wp.z };
+        }
+      }
+      if (b.ek === 'cargo') {
+        var cur = WAP.rack && WAP.rack.current;
+        var cl = cur && cur.cellById ? cur.cellById[b.id] : null;
+        if (cl) return { x: cl.x, y: levelY(cl.l), z: cl.z };
+        var gc = (g.cells || []).filter(function (c2) { return c2.id === b.id; })[0];
+        if (gc) return { x: gc.x, y: levelY(gc.l), z: gc.z };
+      }
+      /* 实体已删除：退回建点时记录的归一化坐标，避免整条路线失效 */
+      if (g) return { x: (g.x0 + g.x1) / 2 + (b.nx || 0), y: b.y || CONVEY_Y,
+        z: (g.z0 + g.z1) / 2 + (b.nz || 0) };
+      return null;
+    }
     if (b.t === 'device') {
       var dev = eq ? eq.devices.filter(function (d) { return d.id === b.id; })[0] : null;
       if (dev) return { x: dev.x,
@@ -1800,26 +1888,50 @@
       ? /^G\|(-?\d+)\|(-?\d+)$/.exec(dock.key) : null;
     if (m) { ci = +m[1]; cj = +m[2]; }
     function colKey(i, j) { return 'G|' + i + '|' + j; }
-    function put(type, key, yaw, x, z) {
+    /* dockRef：记录该设备相对「本提升机对接格」的格偏移，库体拉伸后由
+       equipment.reanchorLineDevices() 按最新对接格重算 cellKey（输送线不错位）。
+       dc/dr 为 null 表示这台落在没有有效 col/row 的自由格，不参与重锚。 */
+    function put(type, key, yaw, x, z, dc, dr) {
       var cell = key ? eq.cells.filter(function (c) { return c.key === key; })[0]
         : nearestFreeCell(x, z, used);
       if (!cell || used[cell.key]) return;
       used[cell.key] = 1;
       var d = eq.add(type, { key: cell.key, quiet: true, template: true, yaw: yaw });
-      if (d) made.push(d);
+      if (!d) return;
+      if (dock && isFinite(dc) && isFinite(dr))
+        d.dockRef = { liftId: s.id, side: s.side === 'back' ? 'back' : 'front', dc: dc, dr: dr };
+      made.push(d);
+      return d;
     }
     var x0 = dock ? dock.x : s.x, z0 = dock ? dock.z : s.z + dir * 2.8;
     var hasCol = ci != null && cj != null;
-    put('roller', dock ? dock.key : null, 90, x0, z0);
-    for (var k = 1; k <= 2; k++) {
-      var zk = z0 + dir * CELL * k;
-      put('roller', hasCol ? colKey(ci, cj + dir * k) : null, 90, x0, zk);
+    function keyAt(dr) { return hasCol ? colKey(ci, cj + dir * dr) : null; }
+    /* 全结构示范线（仍保持 L 形主线不变，只在直线段替换/叠加设备，
+       orderLine() 只认 CONVEY_TYPES，故新设备不会打乱 carrier 链顺序）：
+       对接格辊道 → 链条机 → 辊道(套检测门) → 转弯移载机 → 转向后辊道 → 拆叠盘机
+       线尾外再摆放 AGV / 人 / 叉车 / 卡车（不进 chain，只作场景气氛）。 */
+    put('roller', dock ? dock.key : null, 90, x0, z0, 0, 0);
+    put('chain', keyAt(1), 90, x0, z0 + dir * CELL * 1, 0, dir * 1);   // 链条输送机
+    var roller2 = put('roller', keyAt(2), 90, x0, z0 + dir * CELL * 2, 0, dir * 2);
+    /* 外形检测门：OVERLAY，套在直线段辊道格上，不占格、不进 chain */
+    if (roller2) {
+      var gate = eq.add('gate', { key: roller2.cellKey, quiet: true, template: true });
+      if (gate) made.push(gate);
     }
-    /* 转弯位 = 移载机（顶升移载做 90° 换向）。
-       拆叠盘机只做空托盘堆叠/拆分，不参与转向，不应放在转弯位。 */
+    /* 转弯位 = 移载机（顶升移载做 90° 换向）；拆叠盘机只做空托盘工位，不参与转向 */
     var turnZ = z0 + dir * CELL * 3;
-    put('transfer', hasCol ? colKey(ci, cj + dir * 3) : null, 0, x0, turnZ);
-    put('roller', hasCol ? colKey(ci - 1, cj + dir * 3) : null, 0, x0 - CELL, turnZ);
+    put('transfer', keyAt(3), 0, x0, turnZ, 0, dir * 3);
+    put('roller', hasCol ? colKey(ci - 1, cj + dir * 3) : null,
+      0, x0 - CELL, turnZ, -1, dir * 3);
+    /* 线尾拆叠盘机：接在转向后辊道外侧一格（空托盘堆垛/拆分工位） */
+    put('destacker', hasCol ? colKey(ci - 2, cj + dir * 3) : null,
+      0, x0 - CELL * 2, turnZ, -2, dir * 3);
+    /* 场景角色：AGV(AMR) / 人 / 叉车 / 卡车，放在线尾外侧空格，纯气氛、不进 carrier 链 */
+    var roles = [['agv', -3, 0], ['person', -1, 1], ['forklift', -2, 1], ['truck', -2, -1]];
+    roles.forEach(function (r) {
+      var key = hasCol ? colKey(ci + r[1], cj + dir * 3 + r[2]) : null;
+      eq.add(r[0], { key: key, quiet: true, template: true });
+    });
     return made;
   }
   /* 模板路线＝用户设计的那条 L 形线路，节点顺序就是货物流转顺序：
@@ -2166,6 +2278,24 @@
     });
   }
 
+  /* —— 公开的路线批量操作（清空场景 / 外部调用用）—— */
+  function clearAllRoutes(silent) {
+    stop();
+    disengageAll();
+    R.routes = []; R.selected = null; R.draft = null; R.seq = 1;
+    save(); showPointGrid(false);
+    if (equipment() && equipment().setPickGrid) equipment().setPickGrid(false);
+    drawMarkers(); drawPath(); renderPanel(); hideHud();
+    if (!silent) toast('已清空全部路线');
+  }
+  function removeRoute(id, silent) {
+    if (R.run && R.run.routeId === id) stop();
+    R.routes = R.routes.filter(function (r) { return r.id !== id; });
+    if (R.selected === id) R.selected = R.routes.length ? R.routes[0].id : null;
+    save(); drawMarkers(); drawPath(); renderPanel();
+    if (!silent) toast('已删除路线 ' + id);
+  }
+
   function bindPanel() {
     function bind(id, fn) { var el = $(id); if (el) el.addEventListener('click', fn); }
     bind('btnRoutes', function () { WAP.ctx.nav('routes'); });
@@ -2175,15 +2305,7 @@
     bind('rtPlay', function () { play(R.selected || (R.routes[0] && R.routes[0].id)); });
     bind('rtStop', function () { stop(); hideHud(); toast('已停止并复位路线货物'); });
     bind('simTemplate', installTemplate);
-    bind('rtClear', function () {
-      stop();
-      disengageAll();
-      R.routes = []; R.selected = null; R.draft = null; R.seq = 1;
-      save(); showPointGrid(false);
-      if (equipment() && equipment().setPickGrid) equipment().setPickGrid(false);
-      drawMarkers(); drawPath(); renderPanel(); hideHud();
-      toast('已清空全部路线');
-    });
+    bind('rtClear', function () { clearAllRoutes(); });
     var nameInput = $('rtName');
     if (nameInput) nameInput.addEventListener('input', function () { setRouteName(nameInput.value); });
     var nodes = $('rtNodes');
@@ -2213,15 +2335,7 @@
       var p = e.target.closest('[data-play]');
       if (p) { play(p.dataset.play); return; }
       var d = e.target.closest('[data-rtdel]');
-      if (d) {
-        var id = d.dataset.rtdel;
-        if (R.run && R.run.routeId === id) stop();
-        R.routes = R.routes.filter(function (r) { return r.id !== id; });
-        if (R.selected === id) R.selected = R.routes.length ? R.routes[0].id : null;
-        save(); drawMarkers(); drawPath(); renderPanel();
-        toast('已删除路线 ' + id);
-        return;
-      }
+      if (d) { removeRoute(d.dataset.rtdel); return; }
       var it = e.target.closest('[data-route]');
       if (it) selectRoute(it.dataset.route);
     });
@@ -2496,12 +2610,14 @@
   }
 
   WAP.routes = {
-    init: init, newDraft: newDraft, finishDraft: finishDraft, cancelDraft: cancelDraft,
+    init: init, load: load, save: save,
+    newDraft: newDraft, finishDraft: finishDraft, cancelDraft: cancelDraft,
     selectRoute: selectRoute, addPoint: addPoint, removeNode: removeNode,
     setCarrier: setCarrier, setRouteName: setRouteName,
     play: play, stop: stop, tick: tick, rebind: rebind, attachBinds: attachBinds,
     variants: routeVariants, activeSeq: activeSeq, autoVariants: autoVariants,
     priorityVariants: priorityVariants,
+    clearAllRoutes: clearAllRoutes, removeRoute: removeRoute,
     selectNode: selectNode, moveSelectedNode: moveSelectedNode,
     setLineHidden: setLineHidden, setTerminalsHidden: setTerminalsHidden,
     syncLoopUI: renderPanel,

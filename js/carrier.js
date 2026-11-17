@@ -28,7 +28,8 @@
     rest: [],               // 已到达并静止保留的货物
     hidden: {},             // cargoId -> 引用计数（临时取下的货架货物）
     locks: {},              // agent: / lift: / dev: -> runnerId
-    t: 0, seq: 1, maxJump: 0, conflicts: 0
+    t: 0, seq: 1, maxJump: 0, conflicts: 0,
+    groundStacks: {}        // 地面格 -> [{unit,bottom,top}]，同点落地按体积堆叠，不穿模
   };
 
   function eq() { return WAP.equipment; }
@@ -371,7 +372,7 @@
     var y0 = Math.max(LAND_Y, first.fromY);
 
     var unit = opt.unit || rack().makeCargoUnit(opt.kind || 'carton',
-      (C.seq * 17) % 997, opt.cls || 'single');
+      (C.seq * 17) % 997, opt.cls || 'goods');
     if (!unit.parent) C.root.add(unit);
     unit.position.set(x0, y0, z0);
 
@@ -387,7 +388,7 @@
       car: null, lift: null, engaged: [], engagedFor: -1, fall: null,
       justAdvanced: false,
       landed: false, done: false, meta: opt.meta || {},
-      kind: opt.kind || 'carton', cls: opt.cls || 'single',
+      kind: opt.kind || 'carton', cls: opt.cls || 'goods',
       seq: (opt.seq || []).slice()
     };
     /* 首段在库内水平 → 真实四向车先开过来接驳，货物在货位上等车 */
@@ -409,6 +410,46 @@
     return r;
   }
 
+  /* ---- 刚体落地堆叠：货物有体积，同格落地按实测包围盒高度叠高，不穿模 ----
+     移动阶段仍全部由 carrier / 真实设备承载；这里只决定「落地那一瞬」的静态落位 y，
+     不违反「carrier 唯一移动货物」约束。预留/释放必须成对，避免账本泄漏。 */
+  function unitHeight(unit) {
+    if (!unit) return 0.34;
+    if (unit.userData && unit.userData.stackH != null) return unit.userData.stackH;
+    var h = 0.34;
+    try {
+      var box = new T.Box3().setFromObject(unit);
+      h = Math.max(0.15, Math.min(1.2, box.max.y - box.min.y));
+    } catch (e) {}
+    if (unit.userData) unit.userData.stackH = h;
+    return h;
+  }
+  function groundKey(x, z) {
+    var cell = nearestGroundCell(x, z, 3.2);
+    return cell ? cell.key : ('G|' + Math.round(x / 2) + '|' + Math.round(z / 2));
+  }
+  function groundReserve(x, z, unit) {
+    var key = groundKey(x, z), stack = C.groundStacks[key] || (C.groundStacks[key] = []);
+    var bottom = stack.length ? stack[stack.length - 1].top : LAND_Y;
+    var h = unitHeight(unit);
+    stack.push({ unit: unit, bottom: bottom, top: bottom + h });
+    if (unit && unit.userData) unit.userData.groundKey = key;
+    return bottom;
+  }
+  function groundRelease(unit) {
+    if (!unit || !unit.userData) return;
+    var key = unit.userData.groundKey;
+    if (!key || !C.groundStacks[key]) return;
+    var stack = C.groundStacks[key].filter(function (q) { return q.unit !== unit; });
+    var y = LAND_Y;
+    stack.forEach(function (q) {
+      q.bottom = y; q.top = y + (q.top - q.bottom) || unitHeight(q.unit); y = q.top;
+      if (q.unit) q.unit.position.y = q.bottom;   // 下层腾空后压实，消除悬空
+    });
+    if (stack.length) C.groundStacks[key] = stack; else delete C.groundStacks[key];
+    delete unit.userData.groundKey;
+  }
+
   function beginFall(r, st) {
     var ex = st && isFinite(st.exitX) ? st.exitX : r.x;
     var ez = st && isFinite(st.exitZ) ? st.exitZ : r.z;
@@ -421,8 +462,10 @@
       var near = nearestGroundCell(lx, lz, 3.2);
       if (near) { lx = near.x; lz = near.z; }
     }
-    r.fall = { ex: ex, ez: ez, lx: lx, lz: lz, y0: Math.max(CONVEY_Y, r.y), vy: 0, vx: 0, vz: 0,
-      fallT: 0, elapsed: 0 };
+    /* 落地前预留该格堆顶高度：两件货落同一点时第二件叠在第一件上方，而非穿模 */
+    var landY = groundReserve(lx, lz, r.unit);
+    r.fall = { ex: ex, ez: ez, lx: lx, lz: lz, landY: landY,
+      y0: Math.max(CONVEY_Y, r.y), vy: 0, vx: 0, vz: 0, fallT: 0, elapsed: 0 };
     r.phase = 'exit';
   }
   function tickFall(r, dt) {
@@ -434,7 +477,7 @@
       if (d > step) { r.x += dx / d * step; r.z += dz / d * step; }
       else {
         r.x = f.ex; r.z = f.ez;
-        var gravityT = Math.sqrt(2 * Math.max(0.1, r.y - LAND_Y) / GRAVITY);
+        var gravityT = Math.sqrt(2 * Math.max(0.1, r.y - (f.landY != null ? f.landY : LAND_Y)) / GRAVITY);
         var hdist = Math.hypot(f.lx - r.x, f.lz - r.z);
         f.fallT = Math.max(gravityT, hdist / SPEED, 0.16);
         f.vx = (f.lx - r.x) / f.fallT;
@@ -451,8 +494,9 @@
     f.vy -= GRAVITY * (f.vyScale || 1) * dt;
     r.y += f.vy * dt;
     C.maxJump = Math.max(C.maxJump, Math.hypot(f.vx * dt, f.vy * dt, f.vz * dt));
-    if (r.y <= LAND_Y) {
-      r.y = LAND_Y; r.x = f.lx; r.z = f.lz;
+    var landAt = f.landY != null ? f.landY : LAND_Y;
+    if (r.y <= landAt) {
+      r.y = landAt; r.x = f.lx; r.z = f.lz;
       r.unit.position.set(r.x, r.y, r.z);
       r.landed = true;
       finish(r);
@@ -536,6 +580,20 @@
       if (u >= 1) r.phase = 'move';
       return;
     }
+    if (r.phase === 'unload') {
+      /* 车停稳放货：货物从车板高度缓缓落到输送面，车此时不移动；
+         落稳后才 next() 释放车，车离开、货物交给下一段转运。 */
+      if (!r.car) { r.phase = 'move'; next(r); return; }
+      r.unloadT += dt;
+      var uu = clamp(r.unloadT / 0.38, 0, 1);
+      r.y = r.unloadY0 + (r.unloadY1 - r.unloadY0) * uu;
+      r.unit.visible = true;
+      r.unit.position.set(r.x, r.y, r.z);
+      r.car.a.st = '放货中 · 落货到输送面';
+      C.maxJump = Math.max(C.maxJump, Math.abs(r.unloadY1 - r.unloadY0) * dt / 0.38);
+      if (uu >= 1) { r.phase = 'move'; next(r); }
+      return;
+    }
     if (r.phase === 'exit' || r.phase === 'fall') { tickFall(r, dt); return; }
     var st = r.steps[r.idx];
     if (!st) { finish(r); return; }
@@ -558,6 +616,35 @@
          即使规划给出斜线，也一律拆成「先 X 后 Z」的 L 形，绝不斜穿。 */
       var diagonal = Math.abs(st.dirX) > 0.02 && Math.abs(st.dirZ) > 0.02;
       var useX = diagonal ? Math.abs(st.toX - r.x) > 0.002 : Math.abs(st.dirX) >= Math.abs(st.dirZ);
+      /* 换向停滞：主轴由 X↔Z 切换时，车在换向点短暂驻留——
+         先减速到停、换轮组（四向车轮 90°），再沿新轴起步。
+         不是瞬移转向，符合真机换向 2s 的物理直觉（演示压缩为 0.45s）。 */
+      var axis = useX ? 'X' : 'Z';
+      if (r.lastAxis && r.lastAxis !== axis && r.turnHold == null) {
+        r.turnHold = 0.45;                 // 换轮+减速驻留
+        a.st = '换向中 · 减速换轮';
+      }
+      r.lastAxis = axis;
+      if (r.turnHold > 0) {
+        r.turnHold -= dt;
+        if (r.turnHold <= 0) r.turnHold = null;
+        return;                            // 驻留期间不推进、不裸移
+      }
+      /* 刚体避货：子通道 Z 段前方若停着别的静止货物，短暂停车避让
+         （2s 超时强制放行，防止极端高在库率下死锁）；车不穿过货物实体。 */
+      if (!useX && r.phase === 'move' && st.toZ != null) {
+        var aheadZ = r.z + Math.sign(st.toZ - r.z) * 0.85;
+        var blocked = (C.rest || []).some(function (q) {
+          return q && q.id !== r.cargoId && Math.abs(q.x - r.x) < 0.55 &&
+            Math.abs(q.z - aheadZ) < 0.55 && q.y < 0.5;
+        });
+        if (blocked && (r.cargoWait || 0) < 2) {
+          r.cargoWait = (r.cargoWait || 0) + dt;
+          a.st = '避让货物 · 前方占用';
+          return;
+        }
+        r.cargoWait = 0;
+      }
       if (!diagonal) { if (useX) r.z = st.fromZ; else r.x = st.fromX; }
       var delta = useX ? (st.toX - r.x) : (st.toZ - r.z);
       var ad = Math.abs(delta), mv = Math.min(ad, step);
@@ -570,7 +657,20 @@
       C.maxJump = Math.max(C.maxJump, mv);
       var rest = Math.abs(st.toX - r.x) + Math.abs(st.toZ - r.z);
       if (rest <= step || (diagonal && rest < 0.003)) {
-        r.x = st.toX; r.z = st.toZ; next(r);
+        r.x = st.toX; r.z = st.toZ;
+        /* 放货不是瞬移：车先把货平稳落在输送面（与取货 0.34s 对称），
+           车在此短暂驻留；放完才 next() 释放车辆离开，
+           后续 conveyor / fall 段在车离开后才开始转运货物。 */
+        var nxt = r.steps[r.idx + 1];
+        var needUnload = nxt && (nxt.mode === 'conveyor' || nxt.mode === 'drop' ||
+          (!nxt.mode && !nxt.zTrack && !nxt.x && nxt.z == null));
+        if (needUnload && !r.unloaded) {
+          r.unloaded = true;
+          r.unloadT = 0; r.unloadY0 = r.y;
+          r.unloadY1 = Math.max(LAND_Y + 0.30, st.fromY != null ? st.fromY : r.y - 0.02);
+          a.st = '放货中 · 落货到输送面';
+          r.phase = 'unload';
+        } else next(r);
       }
       return;
     }
@@ -686,6 +786,7 @@
     var keep = [];
     C.rest.forEach(function (q) {
       if (tag && q.tag !== tag) { keep.push(q); return; }
+      groundRelease(q.unit);
       if (q.unit && q.unit.parent) q.unit.parent.remove(q.unit);
       n++;
     });
@@ -704,6 +805,7 @@
     var keep = [];
     C.rest.forEach(function (q) {
       if (Math.hypot(q.x - x, q.z - z) < rr) {
+        groundRelease(q.unit);
         if (q.unit && q.unit.parent) q.unit.parent.remove(q.unit);
         n++;
       } else keep.push(q);
@@ -713,7 +815,7 @@
   }
   function detachRest(unit) {
     for (var i = 0; i < C.rest.length; i++) {
-      if (C.rest[i].unit === unit) { C.rest.splice(i, 1); return unit; }
+      if (C.rest[i].unit === unit) { C.rest.splice(i, 1); groundRelease(unit); return unit; }
     }
     return unit;
   }
@@ -726,8 +828,9 @@
   function reset() {
     C.runners.slice().forEach(function (r) { dropRunner(r, true); });
     C.runners = [];
-    C.rest.forEach(function (q) { if (q.unit && q.unit.parent) q.unit.parent.remove(q.unit); });
+    C.rest.forEach(function (q) { groundRelease(q.unit); if (q.unit && q.unit.parent) q.unit.parent.remove(q.unit); });
     C.rest = [];
+    C.groundStacks = {};
     restoreAll();
     C.locks = {}; C.conflicts = 0; C.maxJump = 0;
     if (eq() && eq().clearEngaged) eq().clearEngaged();
@@ -801,6 +904,7 @@
       return out;
     },
     setOcc: setOcc, normalizeSteps: normalizeSteps, cloneStep: cloneStep,
+    groundReserve: groundReserve, groundRelease: groundRelease,
     get rest() { return C.rest; },
     get runners() { return C.runners; }
   };

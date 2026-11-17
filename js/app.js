@@ -182,6 +182,8 @@
     WAP.terminals.init();    // 发货器 / 收货器：按路线吐货、到点收走
     WAP.carrier.init();      // 设备职能执行器（包装 onTick，覆盖 sim 的载货台回落）
     WAP.pallets.init();      // 拆叠盘机托盘收集 / 拆分（最后包装 onTick，读取最终货物状态）
+    if (WAP.ambient && WAP.ambient.init) WAP.ambient.init();        // 气氛组动画（纯视觉，只读设备/车辆状态）
+    if (WAP.sceneClear && WAP.sceneClear.init) WAP.sceneClear.init(); // 清空场景 + 整库操作
     var g = WAP.state.geom;
     WAP.scene.fit([g.len, g.top, g.tot]);
     bindKeys();

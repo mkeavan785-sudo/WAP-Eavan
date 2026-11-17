@@ -112,12 +112,22 @@
     (geom().cells || []).some(function (c) { if (c.id === id) { hit = c; return true; } return false; });
     return hit;
   }
+  /* 进入路径是否被有货货位挡住：从最近主通道沿 Z 到该货位之间若还有 occ 格，
+     四向车无法穿过货物抵达——选格时加惩罚而非硬排除（避免高在库率下无解死锁）。 */
+  function approachBlocked(c) {
+    var g = geom(), tz = trackNearZ(c.z);
+    return (g.cells || []).some(function (o) {
+      return o.occ && o.l === c.l && o.i === c.i && o.b === c.b && o.id !== c.id &&
+        Math.min(o.z, tz) < c.z - 0.02 && Math.max(o.z, tz) > c.z + 0.02;
+    });
+  }
   function pickOccupied(near) {
     var best = null, bd = 1e9;
     (geom().cells || []).forEach(function (c) {
       if (!c.occ || c.conv >= 0 || c.chg || c.flowReserved) return;
       if (WAP.physics && WAP.physics.overloaded(c)) return;   // 物理模式：超载 1.5T 拒载
       var d = Math.hypot(c.x - near.x, c.z - near.z) - (c.l >= 1 ? 2.5 : 0);
+      if (approachBlocked(c)) d += 10;                       // 避货：优先选无遮挡路线
       if (d < bd) { bd = d; best = c; }
     });
     return best;
@@ -130,6 +140,7 @@
       if (WAP.physics && WAP.physics.overloaded(c)) return;   // 物理模式：超载 1.5T 拒载
       var penalty = c.l === want ? 0 : 6;
       var d = Math.hypot(c.x - near.x, c.z - near.z) + penalty + (c.rank || 0);
+      if (approachBlocked(c)) d += 10;                       // 避货：优先选无遮挡路线
       if (d < bd) { bd = d; best = c; }
     });
     return best;
@@ -305,11 +316,30 @@
     if (c && c.snapshot().locks['agent:' + a.id]) return true;
     var playing = !!(sim() && sim().playing);
     if (!playing) { a.q.push({ wait: 0.8, st: '待机' }); return true; }
-    var g = geom(), track = (g.tracks || [])[0] || 0;
+    var g = geom(), tracks = g.tracks || [0];
+    var track = tracks[0] || 0;
     var x0 = g.x0 + (g.len || 10) * 0.2, x1 = g.x0 + (g.len || 10) * 0.8;
     F.cruiseIdx++;
     var from = (F.cruiseIdx % 2) ? x0 : x1, to = (F.cruiseIdx % 2) ? x1 : x0;
     a.q.push({ zTrack: true, st: '返回主通道待命' });
+    /* 跨主通道演示：让空闲车周期性地沿子通道下探、换到相邻主通道再上行，
+       展示「子通道 → 主通道 → 另一子通道 → 另一主通道」的完整换轨过程。
+       每 3 次巡航做一次跨通道（避免所有车同时跨、保持演示节奏）。 */
+    if (tracks.length > 1 && F.cruiseIdx % 3 === 0) {
+      var ti = Math.floor(F.cruiseIdx / 3) % tracks.length;
+      var nextTi = (ti + 1) % tracks.length;
+      var tz0 = tracks[ti], tz1 = tracks[nextTi];
+      var bay = g.bayX ? g.bayX[Math.floor(g.bayX.length / 2)] : 0;
+      a.q.push(
+        { x: bay, st: '巡航·主通道换位' },
+        { z: tz0, st: '巡航·进入子通道' },
+        { wait: 0.5, st: '换向减速·换轮' },
+        { z: tz1, st: '巡航·穿越子通道' },
+        { wait: 0.5, st: '换向减速·换轮' },
+        { x: to, st: '巡航·新主通道行驶' }
+      );
+      return true;
+    }
     a.q.push({ x: from, st: '巡航待命' }, { x: to, st: '巡航待命' });
     return true;
   }

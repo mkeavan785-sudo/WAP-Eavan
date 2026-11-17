@@ -61,14 +61,18 @@
     if (cell && st.cargoClassOverrides && st.cargoClassOverrides[cell.id]) {
       return st.cargoClassOverrides[cell.id];
     }
-    return cfg().cargoClass || 'single';
+    var g = cfg().cargoClass || 'goods';
+    return WAP.core.CARGO_CLASS_ALIAS[g] || g;
   }
+  /* 质量按「货物/子托/母托」三层组合计算，与 7 大类定义同源 */
   function cargoKg(cell) {
-    var cls = cellClass(cell), kg = cfg().kg || 800;
-    if (cls === 'single') return kg;
-    if (cls === 'combo') return kg + PALLET_KG.sub + PALLET_KG.mother;
-    if (cls === 'sub') return PALLET_KG.sub;
-    return PALLET_KG.mother;
+    var cls = cellClass(cell);
+    var def = WAP.core.CARGO_CLASS_DEF[cls] || WAP.core.CARGO_CLASS_DEF.goods;
+    var kg = 0;
+    if (def.goods) kg += cfg().kg || 800;
+    if (def.sub) kg += PALLET_KG.sub;
+    if (def.mother) kg += PALLET_KG.mother;
+    return kg;
   }
   function cellById(id) {
     if (!id) return null;
